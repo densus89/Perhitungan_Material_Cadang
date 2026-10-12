@@ -1,0 +1,12 @@
+.summary { margin-bottom: 24px; }
+.filters { grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 1fr) minmax(160px, 1fr) minmax(150px, 1fr); }
+.table { min-width: 1480px; }
+.table th, .table td { vertical-align: top; }
+.table tbody tr:hover { background: #f8fbfc; }
+.rank { font-weight: 650; color: #20394d; }
+.reason { min-width: 240px; max-width: 320px; line-height: 1.7; color: var(--muted); }
+.missing { color: #906113; white-space: normal; }
+.explanation { border: 1px solid #bfdfdd; border-radius: 5px; padding: 16px; background: #edf8f7; font-size: 12px; line-height: 1.8; }
+.explanation p { margin-top: 8px; }
+@media (max-width: 1100px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .filters { grid-template-columns: minmax(0, 1fr); } }
