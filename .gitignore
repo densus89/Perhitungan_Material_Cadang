@@ -1,0 +1,35 @@
+# Dependencies and generated output
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Internal planning and source material (never publish)
+PRD.md
+SESSION_HANDOFF.md
+reference-analysis/
+backup/
+ABC/
+Perhitungan Mat Cadang/
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.ppt
+*.pptx
+*.txt
+
+# Superpowers execution scratch
+.superpowers/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.log
