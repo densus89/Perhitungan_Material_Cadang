@@ -15,10 +15,10 @@ test-results/
 # Internal planning and source material (never publish)
 PRD.md
 SESSION_HANDOFF.md
-reference-analysis/
-backup/
-ABC/
-Perhitungan Mat Cadang/
+/reference-analysis/
+/backup/
+/ABC/
+/Perhitungan Mat Cadang/
 *.xlsx
 *.xls
 *.csv

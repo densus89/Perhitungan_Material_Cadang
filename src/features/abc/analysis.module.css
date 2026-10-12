@@ -1,0 +1,16 @@
+.tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.tab { padding: 12px 24px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.tab[aria-selected="true"] { color: var(--teal); border-bottom-color: var(--teal); }
+.currency :global(.kpi-value) { font-size: clamp(16px, 1.45vw, 23px); overflow-wrap: anywhere; margin-top: 18px; }
+.table { min-width: 1160px; }
+.table th, .table td { vertical-align: top; }
+.table tbody tr:hover { background: #f8fbfc; }
+.category { font-weight: 650; color: var(--teal); }
+.summary { margin-bottom: 24px; }
+.ruleList { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
+.ruleList li { display: grid; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid var(--border); font-size: 12px; line-height: 1.6; }
+.ruleList li:last-child { padding-bottom: 0; border-bottom: 0; }
+.ruleList span { color: var(--muted); font-size: 11px; }
+.ideal { font-weight: 650; color: #20394d; }
+.formula { padding: 16px; margin-top: 20px; border-radius: 5px; border: 1px solid #bfdfdd; background: #edf8f7; font-size: 12px; line-height: 1.8; }
+.formula code { display: block; margin-top: 8px; font-size: 11px; white-space: normal; }
