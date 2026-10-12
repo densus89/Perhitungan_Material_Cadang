@@ -9,6 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Match next.config.ts: Next injects this flag when compiling real Link components.
+    env: { __NEXT_TRAILING_SLASH: "true" },
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
   },

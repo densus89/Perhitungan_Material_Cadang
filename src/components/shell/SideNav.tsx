@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 import { ChartNoAxesCombined, ClipboardCheck, Download, FileInput, LayoutDashboard, MapPin, PackageCheck, ScanLine, Zap } from "lucide-react";
 
 const steps = [
@@ -25,9 +26,9 @@ export function SideNav() {
       <p className="nav-section-label">PERENCANAAN</p>
       <nav aria-label="Navigasi utama">
         {steps.map(({ label, href, icon: Icon }) => (
-          <a key={href} href={href} aria-current={currentPath === href.replace(/\/$/, "") ? "page" : undefined}>
+          <Link key={href} href={href} aria-current={currentPath === href.replace(/\/$/, "") ? "page" : undefined}>
             <Icon size={18} aria-hidden="true" /><span>{label}</span>
-          </a>
+          </Link>
         ))}
         <span className="nav-disabled" aria-disabled="true"><Download size={18} aria-hidden="true" /><span>Ekspor</span><small>Segera</small></span>
       </nav>
