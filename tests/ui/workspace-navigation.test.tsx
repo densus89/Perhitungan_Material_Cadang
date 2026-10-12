@@ -38,6 +38,26 @@ function clickClientLink(link: HTMLElement) {
 }
 
 describe("workspace client navigation", () => {
+  it.each(["Setujui", "Tolak"])("refreshes dashboard counts after a %s round trip and clears pending status at zero", (decision) => {
+    render(<ClientNavigationWorkspace initialPath="/ringkasan/" />);
+    expect(within(screen.getByRole("main")).getByRole("status")).toHaveTextContent("3 pemetaan RFQ menunggu approval");
+    clickClientLink(screen.getByRole("link", { name: "Tinjau pemetaan" }));
+    fireEvent.click(within(screen.getByRole("row", { name: /mapping-near\s/ })).getByRole("button", { name: decision }));
+    const nav = screen.getByRole("navigation", { name: "Navigasi utama" });
+    clickClientLink(within(nav).getByRole("link", { name: "Ringkasan" }));
+    expect(within(screen.getByRole("article", { name: "Menunggu approval" })).getByText("1")).toBeVisible();
+    expect(within(screen.getByRole("main")).getByRole("status")).toHaveTextContent("1 pemetaan RFQ menunggu approval");
+    expect(screen.getByText(`${decision === "Tolak" ? 4 : 2} spesifikasi mandiri`)).toBeVisible();
+
+    clickClientLink(screen.getByRole("link", { name: "Tinjau pemetaan" }));
+    fireEvent.click(within(screen.getByRole("row", { name: /mapping-transformer-guard/ })).getByRole("button", { name: "Tolak" }));
+    clickClientLink(within(nav).getByRole("link", { name: "Ringkasan" }));
+    expect(within(screen.getByRole("article", { name: "Menunggu approval" })).getByText("0")).toBeVisible();
+    expect(within(screen.getByRole("main")).getByRole("status")).toHaveTextContent("Semua pemetaan RFQ telah ditinjau");
+    expect(within(screen.getByRole("main")).getByRole("status")).not.toHaveTextContent("draft");
+    expect(screen.getByText(`${decision === "Tolak" ? 5 : 3} spesifikasi mandiri`)).toBeVisible();
+  });
+
   it("uses client navigation for every active sidebar workflow link", () => {
     render(<ClientNavigationWorkspace />);
     const nav = screen.getByRole("navigation", { name: "Navigasi utama" });

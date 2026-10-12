@@ -3,7 +3,7 @@ import { applyApproval, classifyMapping, normalizeSpecification } from "@/src/do
 import { abcResults, gandul, locationPriorities, mappingSuggestions, policyRows, transformerVariants } from "@/src/demo/fixtures";
 import type { ApprovalScope, MappingSuggestion, RfqTarget } from "@/src/domain/types";
 
-const target: RfqTarget = { id: "rfq-20", specification: "TRAFO DEMO MODEL X 60 MVA 150/20 kV" };
+const target: RfqTarget = { id: "rfq-20", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO MODEL X 60 MVA 150/20 kV" };
 const pending = (id: string, originalSpecification = "Trafo Demo 60 MVA 150 / 20 kV"): MappingSuggestion => ({
   id, materialFamily: "TRANSFORMER", originalSpecification,
   normalizedSpecification: normalizeSpecification(originalSpecification), proposedRfq: target,
@@ -25,7 +25,7 @@ describe("RFQ approval", () => {
   });
 
   it("approves selected pending specifications and leaves unrelated rows untouched", () => {
-    const rows = [pending("one"), pending("peer"), pending("two", "TRAFO DEMO 30 MVA 150/20 KV"), pending("three", "TRAFO DEMO 90 MVA 150/20 KV")];
+    const rows = [pending("one"), pending("peer"), { ...pending("two", "TRAFO DEMO 30 MVA 150/20 KV"), proposedRfq: { ...target, id: "rfq-30", specification: "TRAFO DEMO 30 MVA 150/20 KV" } }, pending("three", "TRAFO DEMO 90 MVA 150/20 KV")];
     const result = applyApproval(scope(rows, "SELECTED", ["one", "two"]), { type: "approve" });
     expect(result.map((row) => row.status)).toEqual(["DISETUJUI", "DISETUJUI", "DISETUJUI", "MENUNGGU_APPROVAL"]);
     expect(result[2].approvalMethod).toBe("SELECTED");
@@ -66,7 +66,7 @@ describe("RFQ approval", () => {
   });
 
   it.each(["ONE", "SELECTED", "ALL_FILTERED"] as const)("never accepts incompatible transformer voltages through %s approval", (method) => {
-    const incompatible = { ...pending("guard"), proposedRfq: { id: "rfq-three", specification: "TRAFO DEMO 60 MVA 150/22/10 kV" } };
+    const incompatible = { ...pending("guard"), proposedRfq: { ...target, id: "rfq-three", specification: "TRAFO DEMO 60 MVA 150/22/10 kV" } };
     expect(classifyMapping(incompatible).status).toBe("MENUNGGU_APPROVAL");
     const result = applyApproval(scope([incompatible], method, ["guard"]), { type: "approve" });
     expect(result[0].status).toBe("MENUNGGU_APPROVAL");
@@ -75,7 +75,7 @@ describe("RFQ approval", () => {
   });
 
   it("supports an explicit compatible manual target and records the method", () => {
-    const incompatible = { ...pending("manual"), proposedRfq: { id: "wrong", specification: "TRAFO DEMO 60 MVA 150/22/10 kV" } };
+    const incompatible = { ...pending("manual"), proposedRfq: { ...target, id: "wrong", specification: "TRAFO DEMO 60 MVA 150/22/10 kV" } };
     const result = applyApproval(scope([incompatible], "ONE", ["manual"]), { type: "approve", target });
     expect(result[0].approvedRfq).toEqual(target);
     expect(result[0].approvalMethod).toBe("MANUAL");
@@ -84,6 +84,35 @@ describe("RFQ approval", () => {
   it("does not approve a transformer with an unrecognizable voltage signature", () => {
     const unknown = { ...pending("unknown"), originalSpecification: "Trafo tanpa data tegangan" };
     expect(applyApproval(scope([unknown], "ALL_FILTERED", []), { type: "approve" })[0].status).toBe("MENUNGGU_APPROVAL");
+  });
+
+  it.each([30, 90])("blocks a 60 MVA transformer targeting %s MVA with the same voltage", (capacity) => {
+    const mismatched = { ...target, id: `rfq-${capacity}`, specification: `TRAFO DEMO ${capacity} MVA 150/20 kV` };
+    for (const method of ["ONE", "SELECTED", "ALL_FILTERED"] as const) {
+      const row = { ...pending("capacity"), proposedRfq: mismatched };
+      expect(applyApproval(scope([row], method, [row.id]), { type: "approve" })[0].status).toBe("MENUNGGU_APPROVAL");
+      expect(applyApproval(scope([row], method, [row.id]), { type: "approve", target: mismatched })[0].approvedRfq).toBeNull();
+    }
+  });
+
+  it.each(["BREAKER", "INSTRUMENT", "OTHER"] as const)("blocks %s approvals into a transformer RFQ", (materialFamily) => {
+    const row = { ...pending("family", "PMT Demo Tipe X 150 kV 2000 A"), materialFamily, proposedRfq: target };
+    expect(applyApproval(scope([row], "ONE", [row.id]), { type: "approve" })[0].status).toBe("MENUNGGU_APPROVAL");
+    expect(applyApproval(scope([row], "ONE", [row.id]), { type: "approve", target })[0].approvedRfq).toBeNull();
+  });
+
+  it("accepts equivalent numeric capacity and full winding sequence for a manual target", () => {
+    const compatible = { ...target, id: "rfq-canonical", specification: "TRAFO DEMO 60,0 MVA 150.0 / 20,0 kV" };
+    const result = applyApproval(scope([pending("canonical")], "ONE", ["canonical"]), { type: "approve", target: compatible });
+    expect(result[0].status).toBe("DISETUJUI");
+    expect(result[0].approvedRfq).toEqual(compatible);
+    expect(result[0].approvalMethod).toBe("MANUAL");
+  });
+
+  it("blocks transformer targets with missing capacity and different winding order", () => {
+    for (const specification of ["TRAFO DEMO 150/20 kV", "TRAFO DEMO 60 MVA 20/150 kV"]) {
+      expect(applyApproval(scope([pending("variant")], "ONE", ["variant"]), { type: "approve", target: { ...target, specification } })[0].status).toBe("MENUNGGU_APPROVAL");
+    }
   });
 });
 

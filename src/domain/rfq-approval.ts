@@ -5,15 +5,27 @@ export function normalizeSpecification(specification: string): string {
   return specification.trim().toUpperCase().replace(/\s*\/\s*/g, "/").replace(/\s+/g, " ");
 }
 
-function transformerVoltage(specification: string): string | null {
-  return normalizeSpecification(specification).match(/\b(\d+(?:[.,]\d+)?(?:\/\d+(?:[.,]\d+)?)*)\s*KV\b/)?.[1] ?? null;
+function transformerVariant(specification: string): { capacityMva: number; windingKv: number[] } | null {
+  const normalized = normalizeSpecification(specification);
+  const capacities = [...normalized.matchAll(/\b(\d+(?:[.,]\d+)?)\s*MVA\b/g)];
+  const voltages = [...normalized.matchAll(/\b(\d+(?:[.,]\d+)?(?:\/\d+(?:[.,]\d+)?)+)\s*KV\b/g)];
+  if (capacities.length !== 1 || voltages.length !== 1) return null;
+  const capacityMva = Number(capacities[0][1].replace(",", "."));
+  const windingKv = voltages[0][1].split("/").map((value) => Number(value.replace(",", ".")));
+  if (![capacityMva, ...windingKv].every((value) => Number.isFinite(value) && value > 0)) return null;
+  return { capacityMva, windingKv };
 }
 
-/** Unknown or different transformer voltage signatures always require correction. */
+/** Canonical families must match; transformers retain capacity and ordered windings. */
 export function isCompatibleRfq(row: MappingSuggestion, target: RfqTarget): boolean {
+  if (row.materialFamily !== target.materialFamily) return false;
   if (row.materialFamily !== "TRANSFORMER") return true;
-  const sourceVoltage = transformerVoltage(row.originalSpecification);
-  return sourceVoltage !== null && sourceVoltage === transformerVoltage(target.specification);
+  const source = transformerVariant(row.originalSpecification);
+  const destination = transformerVariant(target.specification);
+  return source !== null && destination !== null
+    && source.capacityMva === destination.capacityMva
+    && source.windingKv.length === destination.windingKv.length
+    && source.windingKv.every((voltage, index) => voltage === destination.windingKv[index]);
 }
 
 export function classifyMapping(row: MappingSuggestion): MappingSuggestion {

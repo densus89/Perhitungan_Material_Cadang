@@ -28,6 +28,7 @@ export type ApprovalMethod = "AUTOMATIC" | "ONE" | "SELECTED" | "ALL_FILTERED" |
 
 export interface RfqTarget {
   id: string;
+  materialFamily: MaterialFamily;
   specification: string;
 }
 

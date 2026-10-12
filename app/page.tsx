@@ -1,6 +1,6 @@
 import SummaryPage from "./(workspace)/ringkasan/page";
-import { AppShell } from "../src/components/shell/AppShell";
+import WorkspaceLayout from "./(workspace)/layout";
 
 export default function Home() {
-  return <AppShell><SummaryPage /></AppShell>;
+  return <WorkspaceLayout><SummaryPage /></WorkspaceLayout>;
 }

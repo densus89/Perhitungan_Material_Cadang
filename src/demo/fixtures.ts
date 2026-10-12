@@ -5,27 +5,27 @@ import type { AbcResult, Coordinates, DemoSourceFile, LocationPriority, MappingS
 export const gandul: Coordinates = { latitude: -6.343459, longitude: 106.787061 };
 
 export const transformerVariants: RfqTarget[] = [
-  { id: "rfq-demo-t01", specification: "TRAFO DEMO 30 MVA 150/20 kV" },
-  { id: "rfq-demo-t02", specification: "TRAFO DEMO 60 MVA 150/20 kV" },
-  { id: "rfq-demo-t03", specification: "TRAFO DEMO 90 MVA 150/20 kV" },
-  { id: "rfq-demo-t04", specification: "TRAFO DEMO 30 MVA 150/22/10 kV" },
-  { id: "rfq-demo-t05", specification: "TRAFO DEMO 60 MVA 150/22/10 kV" },
-  { id: "rfq-demo-t06", specification: "TRAFO DEMO 90 MVA 150/22/10 kV" },
-  { id: "rfq-demo-t07", specification: "TRAFO DEMO 30 MVA 70/20 kV" },
-  { id: "rfq-demo-t08", specification: "TRAFO DEMO 60 MVA 70/20 kV" },
-  { id: "rfq-demo-t09", specification: "TRAFO DEMO 90 MVA 70/20 kV" },
-  { id: "rfq-demo-t10", specification: "TRAFO DEMO 100 MVA 150/70 kV" },
-  { id: "rfq-demo-t11", specification: "TRAFO DEMO 150 MVA 150/70 kV" },
-  { id: "rfq-demo-t12", specification: "TRAFO DEMO 200 MVA 275/150 kV" },
-  { id: "rfq-demo-t13", specification: "TRAFO DEMO 250 MVA 500/150 kV" },
-  { id: "rfq-demo-t14", specification: "TRAFO DEMO 500 MVA 500/150 kV" },
+  { id: "rfq-demo-t01", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 30 MVA 150/20 kV" },
+  { id: "rfq-demo-t02", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 60 MVA 150/20 kV" },
+  { id: "rfq-demo-t03", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 90 MVA 150/20 kV" },
+  { id: "rfq-demo-t04", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 30 MVA 150/22/10 kV" },
+  { id: "rfq-demo-t05", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 60 MVA 150/22/10 kV" },
+  { id: "rfq-demo-t06", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 90 MVA 150/22/10 kV" },
+  { id: "rfq-demo-t07", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 30 MVA 70/20 kV" },
+  { id: "rfq-demo-t08", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 60 MVA 70/20 kV" },
+  { id: "rfq-demo-t09", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 90 MVA 70/20 kV" },
+  { id: "rfq-demo-t10", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 100 MVA 150/70 kV" },
+  { id: "rfq-demo-t11", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 150 MVA 150/70 kV" },
+  { id: "rfq-demo-t12", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 200 MVA 275/150 kV" },
+  { id: "rfq-demo-t13", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 250 MVA 500/150 kV" },
+  { id: "rfq-demo-t14", materialFamily: "TRANSFORMER", specification: "TRAFO DEMO 500 MVA 500/150 kV" },
 ];
 
 export const rfqTargets: RfqTarget[] = [
   ...transformerVariants,
-  { id: "rfq-demo-cb", specification: "PMT DEMO 150 kV 2000 A" },
-  { id: "rfq-demo-ct", specification: "CT DEMO 150 kV 1000/1 A" },
-  { id: "rfq-demo-ins", specification: "ISOLATOR DEMO 150 kV" },
+  { id: "rfq-demo-cb", materialFamily: "BREAKER", specification: "PMT DEMO 150 kV 2000 A" },
+  { id: "rfq-demo-ct", materialFamily: "INSTRUMENT", specification: "CT DEMO 150 kV 1000/1 A" },
+  { id: "rfq-demo-ins", materialFamily: "OTHER", specification: "ISOLATOR DEMO 150 kV" },
 ];
 
 const mappingInputs: MappingSuggestion[] = [
@@ -36,7 +36,7 @@ const mappingInputs: MappingSuggestion[] = [
   { id: "mapping-transformer-guard", materialFamily: "TRANSFORMER", originalSpecification: "Trafo Demo Tipe Y 60 MVA 150/20 kV", normalizedSpecification: "", proposedRfq: transformerVariants[4], approvedRfq: null, matchKind: "NEAR", status: "MENUNGGU_APPROVAL", approvalMethod: null, affectedAssetCount: 9, differences: ["150/20 kV berbeda dengan 150/22/10 kV", "Jumlah belitan berbeda"], groupKey: "" },
   { id: "mapping-economic", materialFamily: "INSTRUMENT", originalSpecification: "CT DEMO 150 kV 1000/1 A", normalizedSpecification: "", proposedRfq: rfqTargets[15], approvedRfq: null, matchKind: "EXACT", status: "MENUNGGU_APPROVAL", approvalMethod: null, affectedAssetCount: 40, differences: [], groupKey: "" },
   { id: "mapping-c", materialFamily: "OTHER", originalSpecification: "ISOLATOR DEMO 150 kV", normalizedSpecification: "", proposedRfq: rfqTargets[16], approvedRfq: null, matchKind: "EXACT", status: "MENUNGGU_APPROVAL", approvalMethod: null, affectedAssetCount: 120, differences: [], groupKey: "" },
-  { id: "mapping-rejected", materialFamily: "OTHER", originalSpecification: "KONEKTOR DEMO TIPE Z", normalizedSpecification: "", proposedRfq: { id: "rfq-demo-connector", specification: "KONEKTOR DEMO TIPE A" }, approvedRfq: null, matchKind: "NEAR", status: "SPESIFIKASI_MANDIRI", approvalMethod: "ONE", affectedAssetCount: 30, differences: ["Tipe Z ditolak untuk penggabungan dengan Tipe A"], groupKey: "" },
+  { id: "mapping-rejected", materialFamily: "OTHER", originalSpecification: "KONEKTOR DEMO TIPE Z", normalizedSpecification: "", proposedRfq: { id: "rfq-demo-connector", materialFamily: "OTHER", specification: "KONEKTOR DEMO TIPE A" }, approvedRfq: null, matchKind: "NEAR", status: "SPESIFIKASI_MANDIRI", approvalMethod: "ONE", affectedAssetCount: 30, differences: ["Tipe Z ditolak untuk penggabungan dengan Tipe A"], groupKey: "" },
 ];
 
 export const mappingSuggestions: MappingSuggestion[] = mappingInputs.map((row) => row.id === "mapping-rejected"

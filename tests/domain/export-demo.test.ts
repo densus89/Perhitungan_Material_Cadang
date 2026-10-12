@@ -31,7 +31,7 @@ describe("sanitized demo export", () => {
   });
 
   it("allowlists authored demo text and excludes local metadata, unknown rows, and source identifiers", () => {
-    const injected = { ...mappingSuggestions[1], originalSpecification: "GI OPERASIONAL RAHASIA", groupKey: "source-internal-01", approvedRfq: { id: "rfq-internal", specification: "C:\\private\\asset.xlsx" }, sourceId: "operational-source", filePath: "D:\\private\\source.xlsx" };
+    const injected = { ...mappingSuggestions[1], originalSpecification: "GI OPERASIONAL RAHASIA", groupKey: "source-internal-01", approvedRfq: { id: "rfq-internal", materialFamily: "BREAKER" as const, specification: "C:\\private\\asset.xlsx" }, sourceId: "operational-source", filePath: "D:\\private\\source.xlsx" };
     const state = { mappingRows: [injected, { ...injected, id: "operational-row" }], localFileMetadata: { name: "internal.xlsx", size: 10, type: "secret" }, sourceFiles: [{ id: "source-private", name: "private.xlsx" }] };
     const snapshot = createDemoSnapshot(state);
     for (const payload of [JSON.stringify(snapshot), serializeDemoCsv(snapshot, "locations"), serializeDemoCsv(snapshot, "approvalAudit"), serializeDemoCsv(snapshot, "policies")]) {

@@ -97,6 +97,10 @@ describe("RFQ approval workspace", () => {
     expect(within(row("mapping-transformer-guard")).getByRole("button", { name: "Setujui" })).toBeDisabled();
     fireEvent.click(within(row("mapping-transformer-guard")).getByRole("button", { name: "Detail audit" }));
     const drawer = screen.getByRole("dialog", { name: "Audit pemetaan RFQ" });
+    for (const name of ["TRAFO DEMO 30 MVA 150/20 kV", "TRAFO DEMO 90 MVA 150/20 kV", "PMT DEMO 150 kV 2000 A"]) {
+      expect(within(drawer).getByRole("option", { name: new RegExp(name) })).toBeDisabled();
+    }
+    expect(within(drawer).getByRole("option", { name: "TRAFO DEMO 60 MVA 150/20 kV" })).not.toBeDisabled();
     fireEvent.change(within(drawer).getByLabelText("Target RFQ manual"), { target: { value: "rfq-demo-t05" } });
     expect(within(drawer).getByRole("button", { name: "Terapkan target manual" })).toBeDisabled();
     fireEvent.change(within(drawer).getByLabelText("Target RFQ manual"), { target: { value: "rfq-demo-t02" } });
@@ -104,5 +108,15 @@ describe("RFQ approval workspace", () => {
     expect(drawer).toHaveTextContent("DISETUJUI");
     expect(drawer).toHaveTextContent("MANUAL");
     expect(drawer).toHaveTextContent("TRAFO DEMO 60 MVA 150/20 kV");
+  });
+
+  it("disables transformer manual targets for a PMT review", () => {
+    render(<WorkspaceLayout><MappingPage /></WorkspaceLayout>);
+    fireEvent.click(within(row("mapping-near")).getByRole("button", { name: "Detail audit" }));
+    const drawer = screen.getByRole("dialog", { name: "Audit pemetaan RFQ" });
+    expect(within(drawer).getByRole("option", { name: /TRAFO DEMO 60 MVA 150\/20 kV/ })).toBeDisabled();
+    expect(within(drawer).getByRole("option", { name: "PMT DEMO 150 kV 2000 A" })).not.toBeDisabled();
+    fireEvent.change(within(drawer).getByLabelText("Target RFQ manual"), { target: { value: "rfq-demo-t02" } });
+    expect(within(drawer).getByRole("button", { name: "Terapkan target manual" })).toBeDisabled();
   });
 });

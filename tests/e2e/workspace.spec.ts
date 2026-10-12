@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 test("dashboard to approval, policy, P0 locations, and current demo export", async ({ page }) => {
-  await page.goto("/ringkasan/");
+  await page.goto("/");
   await expect(page.getByText("Data Demo", { exact: true })).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Lewati ke konten utama" })).toBeFocused();
@@ -14,6 +14,10 @@ test("dashboard to approval, policy, P0 locations, and current demo export", asy
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { level: 1, name: "Pemetaan RFQ" })).toBeVisible();
   await page.getByRole("row", { name: /mapping-near\s/ }).getByRole("button", { name: "Setujui", exact: true }).click();
+  await nav.getByRole("link", { name: "Ringkasan", exact: true }).click();
+  await expect(page.getByRole("article", { name: "Menunggu approval" }).locator(".kpi-value")).toHaveText("1");
+  await expect(page.getByRole("status")).toContainText("1 pemetaan RFQ menunggu approval");
+  await expect(page.getByText("2 spesifikasi mandiri", { exact: true })).toBeVisible();
   await nav.getByRole("link", { name: "Inventory Policy", exact: true }).click();
   await expect(page.getByRole("row", { name: /PMT Demo Tipe X/ })).toContainText("Disetujui");
   await nav.getByRole("link", { name: "Prioritas Lokasi", exact: true }).click();
@@ -34,6 +38,45 @@ test("dashboard to approval, policy, P0 locations, and current demo export", asy
   const csv = await csvDownload;
   expect(await readFile((await csv.path())!, "utf8")).toContain('"idealQuantityReference","allocationStatus"');
   await expect(page.getByText("Data Demo", { exact: true })).toBeVisible();
+});
+
+test("rejection round trips refresh standalone counts and completed dashboard status", async ({ page }) => {
+  await page.goto("/ringkasan/");
+  const nav = page.getByRole("navigation", { name: "Navigasi utama" });
+  await page.getByRole("link", { name: "Tinjau pemetaan" }).click();
+  await page.getByRole("row", { name: /mapping-near\s/ }).getByRole("button", { name: "Tolak", exact: true }).click();
+  await nav.getByRole("link", { name: "Ringkasan", exact: true }).click();
+  await expect(page.getByRole("article", { name: "Menunggu approval" }).locator(".kpi-value")).toHaveText("1");
+  await expect(page.getByText("4 spesifikasi mandiri", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Tinjau pemetaan" }).click();
+  await page.getByRole("row", { name: /mapping-transformer-guard/ }).getByRole("button", { name: "Tolak", exact: true }).click();
+  await nav.getByRole("link", { name: "Ringkasan", exact: true }).click();
+  await expect(page.getByRole("article", { name: "Menunggu approval" }).locator(".kpi-value")).toHaveText("0");
+  await expect(page.getByText("5 spesifikasi mandiri", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Semua pemetaan RFQ telah ditinjau");
+  await expect(page.getByRole("status")).not.toContainText("draft");
+});
+
+test("manual RFQ choices preserve material family and transformer capacity through dashboard completion", async ({ page }) => {
+  await page.goto("/pemetaan-rfq/");
+  const breaker = page.getByRole("row", { name: /mapping-near\s/ });
+  await breaker.getByRole("button", { name: "Detail audit" }).click();
+  const drawer = page.getByRole("dialog", { name: "Audit pemetaan RFQ" });
+  await expect(drawer.locator('option[value="rfq-demo-t02"]')).toBeDisabled();
+  await drawer.getByRole("button", { name: "Tutup dialog" }).click();
+  await breaker.getByRole("button", { name: "Setujui", exact: true }).click();
+  await page.getByRole("row", { name: /mapping-transformer-guard/ }).getByRole("button", { name: "Detail audit" }).click();
+  for (const id of ["rfq-demo-t01", "rfq-demo-t03", "rfq-demo-t05", "rfq-demo-cb"]) {
+    await expect(drawer.locator(`option[value="${id}"]`)).toBeDisabled();
+  }
+  await drawer.getByLabel("Target RFQ manual").selectOption("rfq-demo-t02");
+  await drawer.getByRole("button", { name: "Terapkan target manual" }).click();
+  await expect(drawer).toContainText("DISETUJUI");
+  await drawer.getByRole("button", { name: "Tutup dialog" }).click();
+  await page.getByRole("navigation", { name: "Navigasi utama" }).getByRole("link", { name: "Ringkasan", exact: true }).click();
+  await expect(page.getByRole("article", { name: "Menunggu approval" }).locator(".kpi-value")).toHaveText("0");
+  await expect(page.getByText("2 spesifikasi mandiri", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Semua pemetaan RFQ telah ditinjau");
 });
 
 for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "narrow", width: 390, height: 844 }]) {
