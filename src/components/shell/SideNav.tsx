@@ -11,6 +11,7 @@ const steps = [
   { label: "Analisis ABC", href: "/analisis-abc/", icon: ChartNoAxesCombined },
   { label: "Inventory Policy", href: "/inventory-policy/", icon: PackageCheck },
   { label: "Prioritas Lokasi", href: "/prioritas-lokasi/", icon: MapPin },
+  { label: "Ekspor", href: "/ekspor/", icon: Download },
 ];
 
 export function SideNav() {
@@ -30,7 +31,6 @@ export function SideNav() {
             <Icon size={18} aria-hidden="true" /><span>{label}</span>
           </Link>
         ))}
-        <span className="nav-disabled" aria-disabled="true"><Download size={18} aria-hidden="true" /><span>Ekspor</span><small>Segera</small></span>
       </nav>
       <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div><strong>Lingkungan demonstrasi</strong><p>Seluruh data bersifat sintetis.</p></div></div>
     </aside>

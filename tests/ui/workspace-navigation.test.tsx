@@ -43,12 +43,11 @@ describe("workspace client navigation", () => {
     const nav = screen.getByRole("navigation", { name: "Navigasi utama" });
     for (const [name, path] of [
       ["Ringkasan", "/ringkasan/"], ["Impor", "/impor/"], ["Pemetaan RFQ", "/pemetaan-rfq/"],
-      ["Analisis ABC", "/analisis-abc/"], ["Inventory Policy", "/inventory-policy/"], ["Prioritas Lokasi", "/prioritas-lokasi/"],
+      ["Analisis ABC", "/analisis-abc/"], ["Inventory Policy", "/inventory-policy/"], ["Prioritas Lokasi", "/prioritas-lokasi/"], ["Ekspor", "/ekspor/"],
     ]) {
       clickClientLink(within(nav).getByRole("link", { name }));
       expect(screen.getByLabelText("Rute aktif")).toHaveTextContent(path);
     }
-    expect(within(nav).queryByRole("link", { name: /Ekspor/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Lewati ke konten utama" })).toHaveAttribute("href", "#konten-utama");
   });
 

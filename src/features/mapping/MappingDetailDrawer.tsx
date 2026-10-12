@@ -7,7 +7,7 @@ import { isCompatibleRfq } from "../../domain/rfq-approval";
 import type { MappingSuggestion, RfqTarget } from "../../domain/types";
 import { Badge } from "../../components/ui/Badge";
 
-/** Native modal behavior supplies focus containment and makes the background inert. */
+/** Native modal behavior makes the background inert; explicit Tab cycling keeps focus on dialog controls. */
 export function DemoModal({ title, onClose, children, drawer = false }: { title: string; onClose: () => void; children: ReactNode; drawer?: boolean }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -21,7 +21,16 @@ export function DemoModal({ title, onClose, children, drawer = false }: { title:
     return () => { if (previous instanceof HTMLElement) previous.focus(); };
   }, []);
 
-  return <dialog ref={dialogRef} className={`demo-modal${drawer ? " demo-modal--drawer" : ""}`} aria-label={title} onCancel={(event) => { event.preventDefault(); onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } }}>
+  return <dialog ref={dialogRef} className={`demo-modal${drawer ? " demo-modal--drawer" : ""}`} aria-label={title} onCancel={(event) => { event.preventDefault(); onClose(); }} onKeyDown={(event) => {
+    if (event.key === "Escape") { event.preventDefault(); onClose(); }
+    if (event.key === "Tab") {
+      const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]'));
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+  }}>
     <div className="modal-heading"><h2>{title}</h2><button className="button icon-button" aria-label="Tutup dialog" onClick={onClose}><X size={18} aria-hidden="true" /></button></div>
     {children}
   </dialog>;
