@@ -129,4 +129,16 @@ describe("ABC analysis and policy workspaces", () => {
     expect(row).toHaveTextContent("Draft");
     expect(row).toHaveTextContent("Menunggu approval RFQ");
   });
+
+  it("shows the rejected standalone ABC anchor alongside its hidden peer's pending draft status", () => {
+    render(<Flow destination="abc" />);
+    fireEvent.change(screen.getByLabelText("Cari spesifikasi atau ID"), { target: { value: "mapping-near PMT" } });
+    fireEvent.click(within(screen.getByRole("row", { name: /mapping-near\s/ })).getByRole("button", { name: "Tolak" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lihat hasil" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Whitelist" }));
+    const row = within(screen.getByRole("table", { name: "Peringkat harga dan audit ABC" })).getByRole("row", { name: /PMT Demo Tipe X/ });
+    expect(row).toHaveTextContent("Draft");
+    expect(row).toHaveTextContent("Menunggu approval RFQ");
+    expect(row).toHaveTextContent("Spesifikasi mandiri");
+  });
 });
