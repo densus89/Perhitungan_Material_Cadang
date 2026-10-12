@@ -41,4 +41,6 @@ Aksesibilitas mencakup tautan lewati ke konten, label filter, focus ring, tabel 
 
 ## Deploy ke Vercel
 
-Impor repositori sebagai proyek Next.js, pilih Node.js 24.x, jalankan `pnpm install --frozen-lockfile` dan build `pnpm build`, lalu gunakan direktori output `out` jika konfigurasi proyek meminta direktori statis. `next.config.ts` sudah memakai `output: "export"` dan `trailingSlash: true`. Deploy hanya sumber aplikasi yang dilacak Git dan hasil `out/`; jangan sertakan dokumen internal, berkas lokal pengguna, screenshot QA, atau direktori perencanaan. Tidak diperlukan variabel rahasia atau layanan backend.
+Deployment production: [perhitungan-material-cadang.vercel.app](https://perhitungan-material-cadang.vercel.app).
+
+Proyek menggunakan preset Next.js dan Node.js 24.x. `next.config.ts` sudah memakai `output: "export"` dan `trailingSlash: true`. `.vercelignore` membatasi payload deployment agar dokumen internal, data operasional, hasil build lokal, dan dependency lokal tidak ikut terunggah. Tidak diperlukan variabel rahasia atau layanan backend.

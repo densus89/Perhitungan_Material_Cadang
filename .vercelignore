@@ -1,0 +1,22 @@
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+.git/
+.superpowers/
+/reference-analysis/
+/backup/
+/ABC/
+/Perhitungan Mat Cadang/
+PRD.md
+SESSION_HANDOFF.md
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.ppt
+*.pptx
+*.txt
+*.log
