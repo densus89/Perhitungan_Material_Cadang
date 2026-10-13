@@ -43,4 +43,6 @@ Aksesibilitas mencakup tautan lewati ke konten, label filter, focus ring, tabel 
 
 Deployment production: [perhitungan-material-cadang.vercel.app](https://perhitungan-material-cadang.vercel.app).
 
+Repository GitHub terhubung ke Vercel; setiap push ke branch `main` memicu deployment production otomatis.
+
 Proyek menggunakan preset Next.js dan Node.js 24.x. `next.config.ts` sudah memakai `output: "export"` dan `trailingSlash: true`. `.vercelignore` membatasi payload deployment agar dokumen internal, data operasional, hasil build lokal, dan dependency lokal tidak ikut terunggah. Tidak diperlukan variabel rahasia atau layanan backend.
