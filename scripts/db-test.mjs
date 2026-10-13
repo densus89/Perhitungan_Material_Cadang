@@ -24,6 +24,7 @@ export function assertTapPassed(tap) {
 
 // Only top-level SELECT statements are captured. Quoted SQL/DO bodies and setup
 // statements remain intact; the authoritative test file is never modified.
+// Backslash escapes in single-quoted strings are intentionally unsupported.
 function sqlStatements(sql) {
   const statements = [];
   let current = "";
@@ -38,6 +39,9 @@ function sqlStatements(sql) {
       continue;
     }
     if (quote) {
+      if (quote === "'" && char === "\\") {
+        throw new Error("Unsupported SQL string escape; use doubled quotes or dollar-quoted strings");
+      }
       if (sql.startsWith(quote, index)) {
         current += quote;
         index += quote.length - 1;
@@ -74,7 +78,7 @@ export function wrapTapSql(sql) {
     throw new Error("pgTAP test must use a BEGIN/ROLLBACK transaction");
   }
   const body = statements.slice(1, -1);
-  if (body.some((statement) => /^(?:commit|end|begin|rollback)\b/i.test(statement))) {
+  if (body.some((statement) => /^(?:commit|end|begin|rollback|abort|prepare\s+transaction)\b/i.test(statement))) {
     throw new Error("pgTAP test must not commit or change its transaction");
   }
   const captured = body.map((statement) => /^select\b/i.test(statement)

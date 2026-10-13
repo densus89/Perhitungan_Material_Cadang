@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { assertTapPassed, wrapTapSql } from "../../scripts/db-test.mjs";
 
 describe("linked pgTAP result validation", () => {
@@ -49,4 +50,43 @@ describe("pgTAP SQL capture wrapper", () => {
     expect(() => wrapTapSql("select plan(1); select ok(true); commit;")).toThrow(/transaction/i);
     expect(() => wrapTapSql("begin; select plan(1); commit; rollback;")).toThrow(/commit/i);
   });
+
+  it("rejects escape strings before an escaped quote can hide a COMMIT", () => {
+    const sql = String.raw`begin;
+insert into public.unit_induk (code, name) values (E'it\'s_one', 'x');
+commit;
+insert into public.unit_induk (code, name) values (E'it\'s_two', 'y');
+select plan(1);
+select ok(true);
+rollback;`;
+    expect(() => wrapTapSql(sql)).toThrow(/unsupported.*escape/i);
+  });
+
+  it("rejects backslash string escapes independently of session string settings", () => {
+    const sql = String.raw`begin;
+set local standard_conforming_strings = off;
+insert into public.unit_induk (code, name) values ('it\'s_one', 'x');
+commit;
+insert into public.unit_induk (code, name) values ('it\'s_two', 'y');
+select plan(1);
+select ok(true);
+rollback;`;
+    expect(() => wrapTapSql(sql)).toThrow(/unsupported.*escape/i);
+  });
+
+  it.each(["abort", "ABORT WORK", "abort transaction", "prepare transaction 'synthetic-test'", "PREPARE /* comment */ TRANSACTION 'synthetic-test'"])(
+    "rejects the transaction-ending statement %s",
+    (statement) => {
+      expect(() => wrapTapSql(`begin; ${statement}; select plan(1); select ok(true); rollback;`))
+        .toThrow(/transaction/i);
+    },
+  );
+
+  it.each(["001_foundation_schema.test.sql", "001_foundation_behavior.test.sql"])(
+    "continues to wrap the ordinary SQL in %s",
+    (filename) => {
+      const sql = readFileSync(new URL(`../../supabase/tests/${filename}`, import.meta.url), "utf8");
+      expect(() => wrapTapSql(sql)).not.toThrow();
+    },
+  );
 });
