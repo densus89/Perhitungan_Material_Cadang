@@ -14,7 +14,7 @@
     "build": "next build",
     "test:e2e": "playwright test",
     "supabase": "supabase",
-    "db:test": "supabase test db --linked",
+    "db:test": "node scripts/db-test.mjs",
     "db:lint": "supabase db lint --linked",
     "db:types": "supabase gen types typescript --linked --schema public"
   },

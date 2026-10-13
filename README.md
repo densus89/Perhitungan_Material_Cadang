@@ -25,6 +25,12 @@ pnpm test:e2e
 
 `pnpm build` menghasilkan `out/` dengan semua rute, termasuk `/ekspor/`. Jalankan build sebelum e2e: Playwright menyajikan folder `out/` pada `127.0.0.1:3000`. Port harus kosong. Untuk preview manual setelah build, jalankan `node tests/e2e/serve-static.mjs`. Jangan membuka HTML langsung melalui `file://` karena navigasi dan aset memerlukan HTTP. Laporan Playwright dan hasil build diabaikan oleh Git.
 
+## Pengujian fondasi Supabase
+
+`pnpm db:test -- supabase/tests/001_foundation_schema.test.sql` menguji proyek pengembangan Supabase yang sudah ditautkan. Tanpa argumen, `pnpm db:test` menjalankan seluruh tes SQL di `supabase/tests/`. Runner memakai `supabase db query --linked` melalui Management API, mengumpulkan keluaran pgTAP di tabel sementara, dan mengembalikan status gagal bila assertion gagal atau plan tidak lengkap. Berkas SQL tetap menjadi sumber tes; setiap tes menggunakan transaksi yang di-rollback dan wrapper sementara dibersihkan setelah eksekusi.
+
+Untuk CI atau komputer dengan Docker, runner bawaan tetap tersedia melalui `pnpm supabase test db --linked supabase/tests/001_foundation_schema.test.sql`. CLI versi yang dipakai memerlukan Docker/Podman untuk runner bawaan ini, termasuk ketika database sudah ditautkan. `pnpm db:types > src/lib/supabase/database.types.ts` memperbarui tipe dari skema publik. `supabase/config.toml` mengatur lingkungan lokal; konfigurasi Auth hosted perlu diselaraskan terpisah sebelum alur undangan dipakai.
+
 ## Batas privasi dan ekspor
 
 Impor lokal hanya menyimpan nama, ukuran, dan jenis berkas dalam memori browser. Isi spreadsheet tidak dibaca, diunggah, atau dihitung. Nama yang dipilih pengguna hanya terlihat dalam panel impor pada sesi tersebut.
