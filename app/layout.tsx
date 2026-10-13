@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Perencanaan Material Cadang",
-  description: "Mockup perencanaan material cadang dengan data demonstrasi sintetis.",
+  description: "Ruang kerja perencanaan material cadang dengan akses pengguna terautentikasi.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

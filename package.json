@@ -4,20 +4,29 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
-  "engines": { "node": ">=24.15.0 <25" },
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
   "scripts": {
     "dev": "next dev",
     "test": "vitest run",
     "lint": "eslint . --max-warnings=0",
     "build": "next build",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "supabase": "supabase",
+    "db:test": "supabase test db --linked",
+    "db:lint": "supabase db lint --linked",
+    "db:types": "supabase gen types typescript --linked --schema public"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.3",
     "lucide-react": "1.55.0",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "recharts": "3.10.1"
+    "recharts": "3.10.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "1.64.0",
@@ -30,6 +39,7 @@
     "eslint": "9.39.1",
     "eslint-config-next": "16.4.0",
     "jsdom": "30.1.2",
+    "supabase": "2.120.0",
     "typescript": "5.9.3",
     "vitest": "5.0.4"
   }
