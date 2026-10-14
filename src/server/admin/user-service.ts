@@ -35,7 +35,7 @@ export async function inviteUser(actor: Actor, raw: unknown, deps: UserAdminDepe
   try {
     if (!await deps.unitsExist(input.unitIndukIds)) return invalid;
     if (await deps.emailExists(input.email)) return conflict;
-    const invited = await deps.invite(input.email, `${deps.siteUrl.replace(/\/$/, "")}/auth/callback?next=/auth/set-password`);
+    const invited = await deps.invite(input.email, `${deps.siteUrl.replace(/\/+$/, "")}/auth/invite`);
     if (invited.conflict) return conflict;
     if (!invited.userId) throw new Error("INVITE_FAILED");
     userId = invited.userId;

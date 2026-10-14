@@ -244,11 +244,8 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Admin invitations use the server-verified token-hash callback. The server
-# supplies an allowlisted RedirectTo containing next=/auth/set-password.
-[auth.email.template.invite]
-subject = "Undangan akses Material Cadang PLN"
-content_path = "./supabase/templates/invite.html"
+# Use the default provider's Invite User email. Its implicit session fragment
+# is safely consumed by the dedicated /auth/invite browser landing page.
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

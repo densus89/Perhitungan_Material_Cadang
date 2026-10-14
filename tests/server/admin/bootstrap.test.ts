@@ -20,4 +20,9 @@ describe("local bootstrap guards", () => {
     await expect(bootstrapAdmin(parseBootstrapConfig(env, ["--confirm"]), { hasActiveAdmin: async () => false, findProfile: async () => null, invite: async () => "new-user", stage: async () => {}, restore: async () => {}, assign: async () => { throw new Error("secret-fixture"); }, remove: async (id: string) => { removed.push(id); }, audit: async () => {} })).rejects.toThrow("Bootstrap persistence failed");
     expect(removed).toEqual(["new-user"]);
   });
+  it("uses the fixed default-email invite landing without a next parameter", async () => {
+    let redirect: string | undefined;
+    await bootstrapAdmin(parseBootstrapConfig({ ...env, NEXT_PUBLIC_SITE_URL: "https://material.example/" }, ["--confirm"]), { hasActiveAdmin: async () => false, findProfile: async () => null, invite: async (_email: string, target: string) => { redirect = target; return "new-user"; }, stage: async () => {}, restore: async () => {}, assign: async () => {}, audit: async () => {}, remove: async () => {} });
+    expect(redirect).toBe("https://material.example/auth/invite");
+  });
 });

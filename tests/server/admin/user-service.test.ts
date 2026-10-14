@@ -46,7 +46,7 @@ describe("RST user administration services", () => {
   it("invites to password setup, persists access, and appends a token-free success audit", async () => {
     const { deps, calls, events } = dependencies();
     expect(await inviteUser(admin, input, deps)).toMatchObject({ status: 201 });
-    expect(calls).toEqual(["operator@pln.co.id|https://material.example/auth/callback?next=/auth/set-password", "save", "markInvited"]);
+    expect(calls).toEqual(["operator@pln.co.id|https://material.example/auth/invite", "save", "markInvited"]);
     expect(events).toEqual([expect.objectContaining({ actor_id: admin.userId, action: "USER_INVITED", target_type: "profile", target_id: "30000000-0000-4000-8000-000000000002", details: { role: "UNIT_OPERATOR", unit_induk_ids: input.unitIndukIds } })]);
     expect(JSON.stringify(events)).not.toMatch(/token|password/);
   });

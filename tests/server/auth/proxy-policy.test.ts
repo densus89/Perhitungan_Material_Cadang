@@ -39,11 +39,11 @@ describe("Proxy route policy", () => {
     });
   });
 
-  it.each(["/login", "/login/", "/auth/callback", "/auth/callback/", "/auth/set-password", "/auth/set-password/"])("keeps public route %s reachable", async (path) => {
+  it.each(["/login", "/login/", "/auth/callback", "/auth/callback/", "/auth/set-password", "/auth/set-password/", "/auth/invite", "/auth/invite/"])("keeps public route %s reachable", async (path) => {
     expect((await proxy(new NextRequest(`https://app.example${path}`))).headers.get("location")).toBeNull();
   });
 
-  it.each(["/", "/ringkasan", "/impor/", "/login/extra", "/auth/set-password/extra", "/auth/forgot-password/extra", "/auth/forgot-password-trick", "/auth/private", "/api/private"])("redirects unauthenticated %s to login", async (path) => {
+  it.each(["/", "/ringkasan", "/impor/", "/login/extra", "/auth/set-password/extra", "/auth/forgot-password/extra", "/auth/forgot-password-trick", "/auth/invite/extra", "/auth/invite-trick", "/auth/private", "/api/private"])("redirects unauthenticated %s to login", async (path) => {
     const response = await proxy(new NextRequest(`https://app.example${path}?next=https://evil.com`));
     expect(response.headers.get("location")).toBe("https://app.example/login");
   });
@@ -84,7 +84,7 @@ describe("Proxy matcher", () => {
   it.each(["/_next/static/chunk.js", "/_next/image?url=test.png", "/favicon.ico", "/logo.svg", "/photo.png", "/photo.jpg", "/photo.jpeg", "/photo.gif", "/photo.webp", "/font.woff2", "/styles.css", "/script.js", "/robots.txt", "/sitemap.xml", "/auth/callback", "/auth/callback/", "/auth/callback/resource"])("excludes %s", (url) => {
     expect(doesProxyMatch({ config, nextConfig: {}, url })).toBe(false);
   });
-  it.each(["/", "/login", "/login/", "/ringkasan/", "/auth/set-password", "/auth/forgot-password", "/auth/forgot-password/", "/api/private", "/auth/callback-trick"])("covers %s", (url) => {
+  it.each(["/", "/login", "/login/", "/ringkasan/", "/auth/set-password", "/auth/forgot-password", "/auth/forgot-password/", "/auth/invite", "/auth/invite/", "/auth/invite/extra", "/api/private", "/auth/callback-trick"])("covers %s", (url) => {
     expect(doesProxyMatch({ config, nextConfig: {}, url })).toBe(true);
   });
 });

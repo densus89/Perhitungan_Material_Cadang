@@ -15,7 +15,7 @@ export function parseBootstrapConfig(env, args) {
     try { url = new URL(env[key]); } catch { throw new Error(`Invalid configuration: ${key}`); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error(`Invalid configuration: ${key}`);
   }
-  return { email, supabaseUrl: env.NEXT_PUBLIC_SUPABASE_URL.trim(), secretKey: env.SUPABASE_SECRET_KEY.trim(), siteUrl: env.NEXT_PUBLIC_SITE_URL.trim().replace(/\/$/, ""), allowExisting: args.includes("--allow-existing") };
+  return { email, supabaseUrl: env.NEXT_PUBLIC_SUPABASE_URL.trim(), secretKey: env.SUPABASE_SECRET_KEY.trim(), siteUrl: env.NEXT_PUBLIC_SITE_URL.trim().replace(/\/+$/, ""), allowExisting: args.includes("--allow-existing") };
 }
 
 export async function bootstrapAdmin(config, gateway) {
@@ -24,7 +24,7 @@ export async function bootstrapAdmin(config, gateway) {
   if (existing?.status === "DISABLED") throw new Error("Bootstrap cannot restore a disabled account");
   let userId = existing?.id; let created = false;
   try {
-    if (!userId) { userId = await gateway.invite(config.email, `${config.siteUrl}/auth/callback?next=/auth/set-password`); created = true; }
+    if (!userId) { userId = await gateway.invite(config.email, `${config.siteUrl}/auth/invite`); created = true; }
     await gateway.stage(userId);
     await gateway.assign(userId);
     await gateway.audit({ action: "ADMIN_BOOTSTRAPPED", target_type: "profile", target_id: userId, details: { role: "RST_ADMIN", created } });
