@@ -11,13 +11,13 @@ describe("local bootstrap guards", () => {
   });
   it("refuses a second active admin unless explicitly allowed", async () => {
     const calls: string[] = [];
-    const gateway = { hasActiveAdmin: async () => true, findProfile: async () => null, invite: async () => { calls.push("invite"); return "new-user"; }, assign: async () => { calls.push("assign"); }, remove: async () => { calls.push("remove"); }, audit: async () => { calls.push("audit"); } };
+    const gateway = { hasActiveAdmin: async () => true, findProfile: async () => null, invite: async () => { calls.push("invite"); return "new-user"; }, stage: async () => { calls.push("stage"); }, restore: async () => { calls.push("restore"); }, assign: async () => { calls.push("assign"); }, remove: async () => { calls.push("remove"); }, audit: async () => { calls.push("audit"); } };
     await expect(bootstrapAdmin(parseBootstrapConfig(env, ["--confirm"]), gateway)).rejects.toThrow(/active/i); expect(calls).toEqual([]);
-    await bootstrapAdmin(parseBootstrapConfig(env, ["--confirm", "--allow-existing"]), gateway); expect(calls).toEqual(["invite", "assign", "audit"]);
+    await bootstrapAdmin(parseBootstrapConfig(env, ["--confirm", "--allow-existing"]), gateway); expect(calls).toEqual(["invite", "stage", "assign", "audit", "restore"]);
   });
   it("compensates a failed new-user assignment", async () => {
     const removed: string[] = [];
-    await expect(bootstrapAdmin(parseBootstrapConfig(env, ["--confirm"]), { hasActiveAdmin: async () => false, findProfile: async () => null, invite: async () => "new-user", assign: async () => { throw new Error("secret-fixture"); }, remove: async (id: string) => { removed.push(id); }, audit: async () => {} })).rejects.toThrow("Bootstrap persistence failed");
+    await expect(bootstrapAdmin(parseBootstrapConfig(env, ["--confirm"]), { hasActiveAdmin: async () => false, findProfile: async () => null, invite: async () => "new-user", stage: async () => {}, restore: async () => {}, assign: async () => { throw new Error("secret-fixture"); }, remove: async (id: string) => { removed.push(id); }, audit: async () => {} })).rejects.toThrow("Bootstrap persistence failed");
     expect(removed).toEqual(["new-user"]);
   });
 });

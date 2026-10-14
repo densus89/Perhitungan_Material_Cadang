@@ -307,6 +307,17 @@ export type Database = {
     }
     Functions: {
       activate_my_profile: { Args: never; Returns: undefined }
+      // Pending reviewed migration; controller will compare linked regeneration.
+      admin_replace_user_access: {
+        Args: {
+          p_actor_id: string
+          p_role: Database["public"]["Enums"]["app_role"]
+          p_status: Database["public"]["Enums"]["account_status"]
+          p_unit_induk_ids: string[]
+          p_user_id: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       account_status: "INVITED" | "ACTIVE" | "DISABLED"

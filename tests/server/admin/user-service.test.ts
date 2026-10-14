@@ -12,8 +12,9 @@ function dependencies() {
     invite: async (email, redirectTo) => { calls.push(`${email}|${redirectTo}`); return { userId: "30000000-0000-4000-8000-000000000002" }; },
     deleteAuthUser: async (id) => { calls.push(`delete:${id}`); },
     saveInvitation: async () => { calls.push("save"); },
+    markInvited: async () => { calls.push("markInvited"); }, revokeAccess: async () => { calls.push("revoke"); },
     readUser: async () => ({ status: "ACTIVE" }),
-    replaceAccess: async (_input, beforeRestore) => { calls.push("replace"); await beforeRestore(); },
+    replaceAccess: async (input, actorId) => { calls.push("replace"); await deps.audit({ actor_id: actorId, action: "USER_ACCESS_UPDATED", target_type: "profile", target_id: input.userId, details: { role: input.role, unit_induk_ids: input.unitIndukIds, status: input.status } }); return "UPDATED"; },
     audit: async (event) => { events.push(event); }, log: (code) => { calls.push(`log:${code}`); },
   };
   return { deps, calls, events };
@@ -45,7 +46,7 @@ describe("RST user administration services", () => {
   it("invites to password setup, persists access, and appends a token-free success audit", async () => {
     const { deps, calls, events } = dependencies();
     expect(await inviteUser(admin, input, deps)).toMatchObject({ status: 201 });
-    expect(calls).toEqual(["operator@pln.co.id|https://material.example/auth/callback?next=/auth/set-password", "save"]);
+    expect(calls).toEqual(["operator@pln.co.id|https://material.example/auth/callback?next=/auth/set-password", "save", "markInvited"]);
     expect(events).toEqual([expect.objectContaining({ actor_id: admin.userId, action: "USER_INVITED", target_type: "profile", target_id: "30000000-0000-4000-8000-000000000002", details: { role: "UNIT_OPERATOR", unit_induk_ids: input.unitIndukIds } })]);
     expect(JSON.stringify(events)).not.toMatch(/token|password/);
   });
@@ -54,12 +55,12 @@ describe("RST user administration services", () => {
     const result = await inviteUser(admin, input, deps);
     expect(result).toMatchObject({ status: 500 }); expect(JSON.stringify(result)).not.toMatch(/secret|token/);
     expect(calls).toContain("delete:30000000-0000-4000-8000-000000000002");
-    expect(events).toEqual([expect.objectContaining({ action: "USER_INVITE_FAILED", details: { cleanup_failed: false } })]);
+    expect(events).toEqual([expect.objectContaining({ action: "USER_INVITE_FAILED", details: { cleanup_failed: false, revoke_failed: false } })]);
   });
   it("reports cleanup failure through sanitized audit and logs", async () => {
     const { deps, calls, events } = dependencies(); deps.saveInvitation = async () => { throw new Error("secret"); }; deps.deleteAuthUser = async () => { throw new Error("secret"); };
     expect(await inviteUser(admin, input, deps)).toMatchObject({ status: 500 });
-    expect(calls).toContain("log:INVITE_CLEANUP_FAILED"); expect(events).toEqual([expect.objectContaining({ details: { cleanup_failed: true } })]); expect(JSON.stringify({ calls, events })).not.toContain("secret");
+    expect(calls).toContain("log:INVITE_CLEANUP_FAILED"); expect(events).toEqual([expect.objectContaining({ details: { cleanup_failed: true, revoke_failed: false } })]); expect(JSON.stringify({ calls, events })).not.toContain("secret");
   });
   it("replaces access and audits disabling without deleting history", async () => {
     const { deps, calls, events } = dependencies();
@@ -76,5 +77,10 @@ describe("RST user administration services", () => {
     const result = await updateUserAccess(admin, { userId: "30000000-0000-4000-8000-000000000002", role: "VIEWER", unitIndukIds: [], status: "DISABLED" }, deps);
     expect(result).toMatchObject({ status: 500 }); expect(JSON.stringify(result)).not.toContain("secret");
     expect(events).toEqual([expect.objectContaining({ action: "USER_ACCESS_UPDATE_FAILED" })]); expect(calls).toContain("log:USER_ACCESS_UPDATE_FAILED");
+  });
+  it.each([["FORBIDDEN", 403], ["ACCESS_CONFLICT", 409], ["FAILED", 500]] as const)("honors database outcome %s without claiming success", async (outcome, status) => {
+    const { deps, events } = dependencies(); deps.replaceAccess = async () => outcome;
+    expect(await updateUserAccess(admin, { userId: "30000000-0000-4000-8000-000000000002", role: "VIEWER", unitIndukIds: [], status: "DISABLED" }, deps)).toMatchObject({ status });
+    expect(events).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@ import { inviteUserSchema, updateUserAccessSchema, type InviteUserInput, type Up
 import type { Database } from "../../lib/supabase/database.types";
 
 type AuditEvent = Database["public"]["Tables"]["audit_events"]["Insert"];
+export type AccessReplaceOutcome = "UPDATED" | "FAILED" | "FORBIDDEN" | "ACCESS_CONFLICT";
 export interface UserAdminDependencies {
   siteUrl: string;
   unitsExist(ids: string[]): Promise<boolean>;
@@ -12,8 +13,10 @@ export interface UserAdminDependencies {
   invite(email: string, redirectTo: string): Promise<{ userId?: string; conflict?: boolean }>;
   deleteAuthUser(id: string): Promise<void>;
   saveInvitation(id: string, input: InviteUserInput): Promise<void>;
+  markInvited(id: string): Promise<void>;
+  revokeAccess(id: string): Promise<void>;
   readUser(id: string): Promise<{ status: ManagedUser["status"] } | null>;
-  replaceAccess(input: UpdateUserAccessInput, beforeRestore: () => Promise<void>): Promise<void>;
+  replaceAccess(input: UpdateUserAccessInput, actorId: string): Promise<AccessReplaceOutcome>;
   audit(event: AuditEvent): Promise<void>;
   log(code: string): void;
 }
@@ -38,13 +41,15 @@ export async function inviteUser(actor: Actor, raw: unknown, deps: UserAdminDepe
     userId = invited.userId;
     await deps.saveInvitation(userId, input);
     await deps.audit({ actor_id: actor.userId, action: "USER_INVITED", target_type: "profile", target_id: userId, details: { role: input.role, unit_induk_ids: input.unitIndukIds } });
+    await deps.markInvited(userId);
     return { status: 201, code: "USER_INVITED", message: "Undangan berhasil dikirim." };
   } catch {
-    let cleanupFailed = false;
+    let cleanupFailed = false; let revokeFailed = false;
     if (userId) {
+      try { await deps.revokeAccess(userId); } catch { revokeFailed = true; deps.log("INVITE_REVOKE_FAILED"); }
       try { await deps.deleteAuthUser(userId); } catch { cleanupFailed = true; deps.log("INVITE_CLEANUP_FAILED"); }
     }
-    await failureAudit(deps, { actor_id: actor.userId, action: "USER_INVITE_FAILED", target_type: "profile", target_id: userId ?? null, details: { cleanup_failed: cleanupFailed } });
+    await failureAudit(deps, { actor_id: actor.userId, action: "USER_INVITE_FAILED", target_type: "profile", target_id: userId ?? null, details: { cleanup_failed: cleanupFailed, revoke_failed: revokeFailed } });
     deps.log("USER_INVITE_FAILED"); return failure;
   }
 }
@@ -57,7 +62,10 @@ export async function updateUserAccess(actor: Actor, raw: unknown, deps: UserAdm
     if (!await deps.unitsExist(input.unitIndukIds)) return invalid;
     const current = await deps.readUser(input.userId);
     if (!current || (current.status === "INVITED" && input.status === "ACTIVE") || (current.status !== "INVITED" && input.status === "INVITED")) return { status: 409, code: "ACCESS_CONFLICT", message: "Status akun tidak dapat diubah dengan permintaan ini." };
-    await deps.replaceAccess(input, () => deps.audit({ actor_id: actor.userId, action: "USER_ACCESS_UPDATED", target_type: "profile", target_id: input.userId, details: { role: input.role, unit_induk_ids: input.unitIndukIds, status: input.status } }));
+    const outcome = await deps.replaceAccess(input, actor.userId);
+    if (outcome === "FORBIDDEN") return forbidden;
+    if (outcome === "ACCESS_CONFLICT") return { status: 409, code: "ACCESS_CONFLICT", message: "Status akun tidak dapat diubah dengan permintaan ini." };
+    if (outcome === "FAILED") { deps.log("USER_ACCESS_UPDATE_FAILED"); return failure; }
     return { status: 200, code: "ACCESS_UPDATED", message: "Akses berhasil diperbarui." };
   } catch {
     await failureAudit(deps, { actor_id: actor.userId, action: "USER_ACCESS_UPDATE_FAILED", target_type: "profile", target_id: input.userId, details: {} });
@@ -86,15 +94,15 @@ export function createUserAdminDependencies(client: Client, siteUrl: string): Us
       check(result); return { userId: result.data.user?.id };
     },
     async deleteAuthUser(id) { check(await client.auth.admin.deleteUser(id)); },
-    async saveInvitation(id, input) { await updateProfile(id, { display_name: input.displayName, status: "INVITED" }); await assignments(id, input); },
+    async saveInvitation(id, input) { await updateProfile(id, { display_name: input.displayName, status: "DISABLED" }); await assignments(id, input); },
+    async markInvited(id) { await updateProfile(id, { status: "INVITED" }); },
+    async revokeAccess(id) { await updateProfile(id, { status: "DISABLED" }); },
     async readUser(id) { const result = await client.from("profiles").select("status").eq("id", id).maybeSingle(); check(result); return result.data; },
-    async replaceAccess(input, beforeRestore) {
-      // Individual PostgREST calls are not a transaction. Revoking access first
-      // ensures every partial assignment failure remains fail-closed.
-      await updateProfile(input.userId, { status: "DISABLED" });
-      await assignments(input.userId, input);
-      await beforeRestore();
-      await updateProfile(input.userId, { status: input.status });
+    async replaceAccess(input, actorId) {
+      const result = await client.rpc("admin_replace_user_access", { p_actor_id: actorId, p_user_id: input.userId, p_role: input.role, p_unit_induk_ids: input.unitIndukIds, p_status: input.status });
+      check(result);
+      if (!["UPDATED", "FAILED", "FORBIDDEN", "ACCESS_CONFLICT"].includes(result.data ?? "")) throw new Error("ADMIN_PERSISTENCE_FAILED");
+      return result.data as AccessReplaceOutcome;
     },
     async audit(event) { check(await client.from("audit_events").insert(event)); },
     log(code) { console.error(`[user-admin] ${code}`); },

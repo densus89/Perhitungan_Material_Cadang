@@ -25,12 +25,15 @@ export async function bootstrapAdmin(config, gateway) {
   let userId = existing?.id; let created = false;
   try {
     if (!userId) { userId = await gateway.invite(config.email, `${config.siteUrl}/auth/callback?next=/auth/set-password`); created = true; }
+    await gateway.stage(userId);
     await gateway.assign(userId);
     await gateway.audit({ action: "ADMIN_BOOTSTRAPPED", target_type: "profile", target_id: userId, details: { role: "RST_ADMIN", created } });
+    await gateway.restore(userId, existing?.status ?? "INVITED");
   } catch {
-    let cleanupFailed = false;
+    let cleanupFailed = false; let revokeFailed = false;
+    if (userId) { try { await gateway.stage(userId); } catch { revokeFailed = true; console.error("[bootstrap-admin] REVOKE_FAILED"); } }
     if (created && userId) { try { await gateway.remove(userId); } catch { cleanupFailed = true; } }
-    try { await gateway.audit({ action: "ADMIN_BOOTSTRAP_FAILED", target_type: "profile", target_id: userId ?? null, details: { cleanup_failed: cleanupFailed } }); } catch { console.error("[bootstrap-admin] FAILURE_AUDIT_FAILED"); }
+    try { await gateway.audit({ action: "ADMIN_BOOTSTRAP_FAILED", target_type: "profile", target_id: userId ?? null, details: { cleanup_failed: cleanupFailed, revoke_failed: revokeFailed } }); } catch { console.error("[bootstrap-admin] FAILURE_AUDIT_FAILED"); }
     if (cleanupFailed) console.error("[bootstrap-admin] CLEANUP_FAILED");
     throw new Error("Bootstrap persistence failed");
   }
@@ -38,6 +41,10 @@ export async function bootstrapAdmin(config, gateway) {
 
 function check(result) { if (result.error) throw new Error("Bootstrap database operation failed"); }
 export function createBootstrapGateway(client) {
+  async function status(userId, value) {
+    const result = await client.from("profiles").update({ status: value, updated_at: new Date().toISOString() }).eq("id", userId).select("id");
+    check(result); if (result.data?.length !== 1) throw new Error("Bootstrap profile missing");
+  }
   return {
     async hasActiveAdmin() {
       const result = await client.from("user_role_assignments").select("user_id,profiles!inner(status)").eq("role", "RST_ADMIN").eq("profiles.status", "ACTIVE").limit(1);
@@ -46,6 +53,8 @@ export function createBootstrapGateway(client) {
     async findProfile(email) { const result = await client.from("profiles").select("id,status").eq("email", email).maybeSingle(); check(result); return result.data; },
     async invite(email, redirectTo) { const result = await client.auth.admin.inviteUserByEmail(email, { redirectTo }); check(result); if (!result.data.user?.id) throw new Error("Bootstrap invitation failed"); return result.data.user.id; },
     async assign(userId) { check(await client.from("user_role_assignments").upsert({ user_id: userId, role: "RST_ADMIN" }, { onConflict: "user_id" })); },
+    async stage(userId) { await status(userId, "DISABLED"); },
+    async restore(userId, value) { await status(userId, value); },
     async remove(userId) { check(await client.auth.admin.deleteUser(userId)); },
     async audit(event) { check(await client.from("audit_events").insert(event)); },
   };
