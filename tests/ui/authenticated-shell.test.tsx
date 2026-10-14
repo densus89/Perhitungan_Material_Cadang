@@ -68,9 +68,10 @@ describe("authenticated workspace shell", () => {
     expect(within(nav).getByRole("link", { name: "Kelola Pengguna" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("does not label the real admin workspace as demo data", () => {
+  it("shows truthful administration context without a demo-data label", () => {
     render(<PathnameContext.Provider value="/admin/pengguna/"><AuthenticatedWorkspace actor={{ ...workspaceActor, role: "RST_ADMIN" }}><p>Admin</p></AuthenticatedWorkspace></PathnameContext.Provider>);
-    expect(screen.queryByText("Data Demo")).not.toBeInTheDocument();
+    expect(screen.getByText("Administrasi Pengguna")).toBeVisible();
+    expect(screen.queryByText(/Data Demo/i)).not.toBeInTheDocument();
   });
 
   it.each<AppRole>(["RST_REVIEWER", "UNIT_OPERATOR", "VIEWER"])("does not show admin navigation to %s", (role) => {

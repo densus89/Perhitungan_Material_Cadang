@@ -6,17 +6,13 @@ import { useActor, useAssignedUnits } from "../../state/AuthWorkspaceProvider";
 import type { AppRole } from "../../domain/access";
 import { LogoutButton } from "../../features/auth/LogoutButton";
 import { logoutAction } from "../../../app/auth/actions";
+import { isPlanningRoute } from "./presentation";
 import styles from "./shell.module.css";
 
 const roleLabels: Record<AppRole, string> = {
   RST_ADMIN: "DIV RST Admin", RST_REVIEWER: "DIV RST Reviewer",
   UNIT_OPERATOR: "Operator Unit Induk", VIEWER: "Viewer",
 };
-
-const planningPaths = new Set([
-  "/ringkasan", "/impor", "/pemetaan-rfq", "/analisis-abc",
-  "/inventory-policy", "/prioritas-lokasi", "/ekspor",
-]);
 
 function resolveDisplayName(displayName: string, email: string) {
   const providedName = displayName.trim();
@@ -34,7 +30,7 @@ export function TopBar() {
   const pathname = usePathname();
   const displayName = resolveDisplayName(actor.displayName, actor.email);
   const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("id-ID");
-  const showDemoBadge = planningPaths.has((pathname ?? "").replace(/\/$/, ""));
+  const showDemoBadge = isPlanningRoute(pathname);
   return (
     <header className={`topbar ${styles.header}`}>
       <div className={styles.context}>
