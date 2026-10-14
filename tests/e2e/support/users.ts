@@ -44,6 +44,16 @@ export async function cleanupSyntheticE2EUsers(client: AdminClient): Promise<voi
   }
 }
 
+export async function resetSyntheticE2EAdminMfa(client: AdminClient): Promise<void> {
+  const user = await findUserByEmail(client, E2E_IDENTITIES.admin.email);
+  if (!user) throw new Error("Synthetic E2E MFA user lookup failed");
+  assertSyntheticE2eUser(user);
+  const listed = requireE2eData(await client.auth.admin.mfa.listFactors({ userId: user.id }), "MFA factor listing");
+  for (const factor of listed.factors) {
+    requireE2eSuccess(await client.auth.admin.mfa.deleteFactor({ userId: user.id, id: factor.id }), "MFA factor deletion");
+  }
+}
+
 export async function provisionSyntheticE2EUsers(client: AdminClient, password: string): Promise<void> {
   await cleanupSyntheticE2EUsers(client);
   const unit = requireE2eData(

@@ -25,7 +25,7 @@ export type E2EEnvironment = {
 };
 
 const confirmation = "yes-delete-synthetic-users";
-const safeOperationFailure = /^Synthetic E2E (user lookup|user cleanup|unit lookup|user creation|profile activation|role assignment|unit assignment) failed$/;
+const safeOperationFailure = /^Synthetic E2E (user lookup|user cleanup|unit lookup|user creation|profile activation|role assignment|unit assignment|MFA factor listing|MFA factor deletion) failed$/;
 
 export function safeE2eFailure(error: unknown, fallback: string): string {
   return error instanceof Error && safeOperationFailure.test(error.message) ? error.message : fallback;

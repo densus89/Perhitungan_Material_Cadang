@@ -14,6 +14,8 @@ type Fixture = {
   user_unit_assignments: object[] | null;
   failedTable?: string;
   throws?: "auth" | "query";
+  assurance?: { currentLevel: "aal1" | "aal2" | null; nextLevel: "aal1" | "aal2" | null };
+  assuranceError?: object | null;
 };
 
 function clientWith(overrides: Partial<Fixture> = {}) {
@@ -23,6 +25,8 @@ function clientWith(overrides: Partial<Fixture> = {}) {
     profiles: [{ id: "auth-user", email: "operator@pln.co.id", display_name: "Operator", status: "ACTIVE" }],
     user_role_assignments: [{ user_id: "auth-user", role: "UNIT_OPERATOR" }],
     user_unit_assignments: [{ user_id: "auth-user", unit_induk_id: "unit-one" }, { user_id: "auth-user", unit_induk_id: "unit-two" }],
+    assurance: { currentLevel: "aal1", nextLevel: "aal1" },
+    assuranceError: null,
     ...overrides,
   };
   const queries: { table: string; column: string; value: string }[] = [];
@@ -30,7 +34,9 @@ function clientWith(overrides: Partial<Fixture> = {}) {
     auth: { async getUser() {
       if (fixture.throws === "auth") throw new Error("Auth unavailable");
       return { data: { user: fixture.user }, error: fixture.authError };
-    } },
+    }, mfa: { async getAuthenticatorAssuranceLevel() {
+      return { data: fixture.assurance, error: fixture.assuranceError };
+    } } },
     from(table: "profiles" | "user_role_assignments" | "user_unit_assignments") {
       return { select() { return { async eq(column: string, value: string) {
         queries.push({ table, column, value });
@@ -112,5 +118,18 @@ describe("required actor", () => {
 
   it("throws a typed 403 for missing application access", async () => {
     await expect(requireActor(clientWith({ user_role_assignments: [] }).client)).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+  });
+
+  it("requires AAL2 for an RST admin", async () => {
+    const admin = { user_role_assignments: [{ role: "RST_ADMIN" }] };
+    await expect(requireActor(clientWith(admin).client)).rejects.toMatchObject({ code: "MFA_REQUIRED", status: 403 });
+    await expect(requireActor(clientWith({ ...admin, assurance: { currentLevel: "aal2", nextLevel: "aal2" } }).client))
+      .resolves.toMatchObject({ role: "RST_ADMIN" });
+  });
+
+  it("fails closed when the assurance level cannot be verified", async () => {
+    await expect(requireActor(clientWith({
+      user_role_assignments: [{ role: "RST_ADMIN" }], assuranceError: { message: "unavailable" },
+    }).client)).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
   });
 });

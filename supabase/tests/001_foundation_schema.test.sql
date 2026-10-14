@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(25);
+select plan(27);
 
 select has_enum('public', 'app_role', 'Application roles exist');
 select has_enum('public', 'account_status', 'Account statuses exist');
@@ -30,6 +30,10 @@ select fk_ok('public', 'approval_events', 'dataset_version_id', 'public', 'datas
 select fk_ok('public', 'approval_events', 'actor_id', 'public', 'profiles', 'id', 'Approval actors reference profiles');
 select fk_ok('public', 'audit_events', 'actor_id', 'public', 'profiles', 'id', 'Audit actors reference profiles');
 select col_is_unique('public', 'dataset_versions', array['dataset_id', 'version_number'], 'Version numbers are unique within a dataset');
+select is((select count(*) from public.unit_induk where id::text like '00000000-0000-4000-8000-%'), 11::bigint, 'Canonical unit references are deployed by migrations');
+select results_eq($sql$ select code from public.unit_induk where id::text like '00000000-0000-4000-8000-%' order by id $sql$,
+  $sql$ values ('BABEL'::text), ('MMU'::text), ('NTB'::text), ('NTT'::text), ('P3BKAL'::text), ('P3BS'::text), ('P3BSUL'::text), ('PPB'::text), ('UIT JBB'::text), ('UIT JBM'::text), ('UIT JBT'::text) $sql$,
+  'Canonical unit codes and stable ordering match the deployment baseline');
 
 select * from finish();
 rollback;

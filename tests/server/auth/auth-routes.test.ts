@@ -4,6 +4,7 @@ import { GET } from "../../../app/auth/callback/route";
 import { loginAction, resetPasswordAction, setPasswordAction, logoutAction } from "../../../app/auth/actions";
 import PasswordPage from "../../../app/auth/set-password/page";
 import LoginPage from "../../../app/login/page";
+import MfaPage from "../../../app/auth/mfa/page";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const boundary = vi.hoisted(() => ({
@@ -77,6 +78,14 @@ describe("auth entry points", () => {
     expect(await setPasswordAction({ status: "idle" }, form({ password: "private-password", confirmPassword: "private-password" }))).toMatchObject({ status: "error" });
     expect(boundary.client.auth.updateUser).not.toHaveBeenCalled();
     await expect(PasswordPage()).rejects.toThrow("REDIRECT:/login/?error=invalid-link");
+  });
+
+  it("requires a verified allowed identity before rendering MFA setup", async () => {
+    expect(await MfaPage()).toBeTruthy();
+    boundary.client.auth.getUser.mockResolvedValueOnce({ data: { user: null }, error: null });
+    await expect(MfaPage()).rejects.toThrow("REDIRECT:/login/");
+    boundary.client.auth.getUser.mockResolvedValueOnce({ data: { user: { email: "outsider@example.com" } }, error: null });
+    await expect(MfaPage()).rejects.toThrow("REDIRECT:/login/");
   });
 
   it("renders password setup for verified PLN users and redirects only after activation succeeds", async () => {

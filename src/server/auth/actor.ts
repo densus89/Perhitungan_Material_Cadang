@@ -9,10 +9,20 @@ type ActorClient = Pick<SupabaseClient<Database>, "auth" | "from">;
 export class ActorAccessError extends Error {
   readonly status: 401 | 403;
 
-  constructor(readonly code: "UNAUTHENTICATED" | "FORBIDDEN") {
-    super(code === "UNAUTHENTICATED" ? "Authentication required" : "Application access denied");
+  constructor(readonly code: "UNAUTHENTICATED" | "FORBIDDEN" | "MFA_REQUIRED") {
+    super(code === "UNAUTHENTICATED" ? "Authentication required" : code === "MFA_REQUIRED" ? "Multi-factor authentication required" : "Application access denied");
     this.name = "ActorAccessError";
     this.status = code === "UNAUTHENTICATED" ? 401 : 403;
+  }
+}
+
+async function hasRequiredAssurance(client: ActorClient, role: AppRole): Promise<boolean> {
+  if (role !== "RST_ADMIN") return true;
+  try {
+    const { data, error } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
+    return !error && data.currentLevel === "aal2";
+  } catch {
+    return false;
   }
 }
 
@@ -43,6 +53,8 @@ async function actorForUser(client: ActorClient, user: User): Promise<Actor | nu
       .select("role").eq("user_id", user.id);
     if (roleError || assignments?.length !== 1 || !roles.includes(assignments[0].role)) return null;
 
+    if (!await hasRequiredAssurance(client, assignments[0].role)) return null;
+
     const { data: units, error: unitError } = await client.from("user_unit_assignments")
       .select("unit_induk_id").eq("user_id", user.id);
     if (unitError || !units) return null;
@@ -70,6 +82,19 @@ export async function requireActor(client: ActorClient): Promise<Actor> {
   const user = await authenticatedUser(client);
   if (!user) throw new ActorAccessError("UNAUTHENTICATED");
   const actor = await actorForUser(client, user);
-  if (!actor) throw new ActorAccessError("FORBIDDEN");
+  if (!actor) {
+    // Resolve only enough relational state to distinguish a valid admin who
+    // must complete MFA from every other denied identity.
+    try {
+      const { data, error } = await client.from("user_role_assignments").select("role").eq("user_id", user.id);
+      if (!error && data?.length === 1 && data[0].role === "RST_ADMIN") {
+        const assurance = await client.auth.mfa.getAuthenticatorAssuranceLevel();
+        if (!assurance.error && assurance.data.currentLevel !== "aal2") throw new ActorAccessError("MFA_REQUIRED");
+      }
+    } catch (error) {
+      if (error instanceof ActorAccessError) throw error;
+    }
+    throw new ActorAccessError("FORBIDDEN");
+  }
   return actor;
 }

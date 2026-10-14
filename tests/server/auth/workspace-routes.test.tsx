@@ -17,6 +17,7 @@ type Fixture = {
   assignedIds: string[];
   unitRows: { id: string; name: string }[] | null;
   unitError: boolean;
+  assurance: "aal1" | "aal2";
 };
 let fixture: Fixture;
 let unitQueries: string[][];
@@ -27,13 +28,15 @@ beforeEach(() => {
     assignedIds: ["unit-jbb", "unit-jbt"],
     // Deliberately return a different order from the authoritative assignments.
     unitRows: [{ id: "unit-jbt", name: "UIT Jawa Bagian Tengah" }, { id: "unit-jbb", name: "UIT Jawa Bagian Barat" }],
-    unitError: false,
+    unitError: false, assurance: "aal1",
   };
   unitQueries = [];
   boundary.createClient.mockReset().mockResolvedValue({
     auth: { async getUser() {
       return { data: { user: fixture.authenticated ? { id: "workspace-user", email: "operator@pln.co.id" } : null }, error: fixture.authError ? { message: "stale-session" } : null };
-    } },
+    }, mfa: { async getAuthenticatorAssuranceLevel() {
+      return { data: { currentLevel: fixture.assurance, nextLevel: fixture.assurance }, error: null };
+    } } },
     from(table: string) {
       return { select() { return {
         async eq() {
@@ -104,11 +107,25 @@ describe("protected workspace server boundary", () => {
     expect(markup).toContain("Belum ada Unit Induk ditugaskan");
     expect(unitQueries).toEqual([]);
   });
+
+  it("redirects an AAL1 admin to MFA and accepts the same admin at AAL2", async () => {
+    fixture.roles = [{ role: "RST_ADMIN" }];
+    fixture.assignedIds = [];
+    await expect(Promise.resolve().then(() => WorkspaceLayout({ children: <p>Protected calculation</p> })))
+      .rejects.toMatchObject({ digest: expect.stringContaining("/auth/mfa/") });
+    fixture.assurance = "aal2";
+    expect(renderToStaticMarkup(await WorkspaceLayout({ children: <p>Protected calculation</p> }))).toContain("Protected calculation");
+  });
 });
 
 describe("root session redirect", () => {
   it("redirects an active authenticated actor to ringkasan", async () => {
     await expect(Promise.resolve().then(() => Home())).rejects.toMatchObject({ digest: expect.stringContaining("/ringkasan/") });
+  });
+
+  it("redirects an AAL1 admin to MFA", async () => {
+    fixture.roles = [{ role: "RST_ADMIN" }];
+    await expect(Promise.resolve().then(() => Home())).rejects.toMatchObject({ digest: expect.stringContaining("/auth/mfa/") });
   });
 
   it.each(["absent", "stale", "disabled", "missing-role"])("redirects %s access to login", async (access) => {

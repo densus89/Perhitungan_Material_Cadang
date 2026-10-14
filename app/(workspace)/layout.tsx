@@ -20,6 +20,7 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
   } catch (error) {
     if (error instanceof ActorAccessError) {
       if (error.status === 401) redirect("/login/");
+      if (error.code === "MFA_REQUIRED") redirect("/auth/mfa/");
       return <AccessUnavailable />;
     }
     throw error;

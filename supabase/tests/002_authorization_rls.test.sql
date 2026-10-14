@@ -29,6 +29,10 @@ $$;
 -- transaction-only sentinels prove account administration does not break RLS QA.
 insert into auth.users (id, email) values
   ('39000000-0000-4000-8000-000000000001', 'rls.unrelated@pln.co.id');
+update public.profiles set status = 'ACTIVE', email = 'rls.mismatch@pln.co.id'
+  where id = '39000000-0000-4000-8000-000000000001';
+insert into public.user_role_assignments (user_id, role) values
+  ('39000000-0000-4000-8000-000000000001', 'VIEWER');
 insert into public.audit_events (action, target_type) values ('unrelated_account_event', 'profile');
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -81,12 +85,13 @@ insert into public.audit_events (actor_id, action, target_type, target_id) value
   ('30000000-0000-4000-8000-000000000001', 'synthetic_fixture', 'dataset', '32000000-0000-4000-8000-000000000001');
 
 select has_function('private', 'current_app_role', array[]::text[], 'Relational role helper exists privately');
+select has_function('private', 'current_identity_is_active', array[]::text[], 'Identity consistency helper exists privately');
 select has_function('private', 'is_rst', array[]::text[], 'RST helper exists privately');
 select has_function('private', 'is_rst_admin', array[]::text[], 'Admin helper exists privately');
 select has_function('private', 'can_access_unit', array['uuid'], 'Unit helper exists privately');
 select is((select count(*)::integer from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'private' and p.proname in ('current_app_role', 'is_rst', 'is_rst_admin', 'can_access_unit')
-  and p.prosecdef and p.proconfig @> array['search_path=""']), 4, 'Authorization helpers are definers with empty search paths');
+  where n.nspname = 'private' and p.proname in ('current_identity_is_active', 'current_app_role', 'is_rst', 'is_rst_admin', 'can_access_unit')
+  and p.prosecdef and p.proconfig @> array['search_path=""']), 5, 'Authorization helpers are definers with empty search paths');
 select is((select count(*)::integer from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
   where n.nspname = 'private' and a.grantee = 0 and a.privilege_type = 'EXECUTE'),
@@ -106,6 +111,11 @@ select throws_ok($sql$ select private.current_app_role() $sql$, '42501', null, '
 reset role;
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"30000000-0000-4000-8000-000000000001","aal":"aal1"}', true);
+set local role authenticated;
+select is(pg_temp.visible($sql$ select count(*) from public.datasets where id in ('32000000-0000-4000-8000-000000000001', '32000000-0000-4000-8000-000000000002') $sql$), 0::bigint, 'AAL1 admin cannot read application data before MFA');
+reset role;
+select set_config('request.jwt.claims', '{"sub":"30000000-0000-4000-8000-000000000001","aal":"aal2"}', true);
 set local role authenticated;
 select is(pg_temp.visible($sql$ select count(*) from public.profiles where id between '30000000-0000-4000-8000-000000000001' and '30000000-0000-4000-8000-000000000010' $sql$), 10::bigint, 'Admin reads every fixture profile');
 select is(pg_temp.visible($sql$ select count(*) from public.user_role_assignments where user_id between '30000000-0000-4000-8000-000000000001' and '30000000-0000-4000-8000-000000000010' $sql$), 9::bigint, 'Admin reads every fixture role');
@@ -126,6 +136,12 @@ select throws_ok($sql$ delete from public.audit_events $sql$, '42501', null, 'Au
 select throws_ok($sql$ update public.approval_events set notes = 'rewritten' $sql$, '42501', null, 'Approval decisions are immutable');
 select throws_ok($sql$ delete from public.approval_events $sql$, '42501', null, 'Approval decisions cannot be deleted by clients');
 select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'admin-forbidden.csv') $sql$, '42501', null, 'Admin cannot upload source files');
+reset role;
+
+select set_config('request.jwt.claim.sub', '39000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"39000000-0000-4000-8000-000000000001","aal":"aal1"}', true);
+set local role authenticated;
+select is(pg_temp.visible($sql$ select count(*) from public.unit_induk where id in ('31000000-0000-4000-8000-000000000001', '31000000-0000-4000-8000-000000000002') $sql$), 0::bigint, 'Auth/profile email mismatch grants no application access');
 reset role;
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000002', true);

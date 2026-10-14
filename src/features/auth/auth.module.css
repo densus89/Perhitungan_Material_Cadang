@@ -10,4 +10,7 @@
 .feedback[role="alert"] { color: #a32626; }
 .feedback[role="status"] { color: #21694b; }
 .fields:disabled, .form button:disabled { opacity: .7; }
+.mfaEnrollment { display: grid; gap: 12px; justify-items: start; }
+.qrCode { width: 220px; height: 220px; max-width: 100%; border: 1px solid var(--border); border-radius: 6px; }
+.secret { max-width: 100%; overflow-wrap: anywhere; padding: 8px; border-radius: 4px; background: #eef3f6; }
 @media (max-width: 480px) { .card { padding: 24px; } }
