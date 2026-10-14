@@ -22,11 +22,28 @@ vi.mock("@supabase/ssr", () => ({ createServerClient: (_url: string, _key: strin
 beforeEach(() => { Object.assign(auth, { user: null, error: null, throws: false, refresh: false }); });
 
 describe("Proxy route policy", () => {
+  describe.each(["/auth/forgot-password", "/auth/forgot-password/"])("anonymous recovery at %s", (path) => {
+    it.each(["GET", "POST"])("allows %s through to the recovery page/action with refreshed cookies", async (method) => {
+      auth.refresh = true;
+      const request = new NextRequest(`https://app.example${path}`, { method, headers: { cookie: "session=stale; old-chunk=stale" } });
+      const response = await proxy(request);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.headers.get("x-middleware-request-cookie")).toContain("session=refreshed");
+      expect(response.cookies.get("session")).toMatchObject({ value: "refreshed", httpOnly: true });
+      expect(response.cookies.get("old-chunk")).toMatchObject({ value: "", maxAge: 0 });
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("expires")).toBe("0");
+      expect(response.headers.get("pragma")).toBe("no-cache");
+    });
+  });
+
   it.each(["/login", "/login/", "/auth/callback", "/auth/callback/", "/auth/set-password", "/auth/set-password/"])("keeps public route %s reachable", async (path) => {
     expect((await proxy(new NextRequest(`https://app.example${path}`))).headers.get("location")).toBeNull();
   });
 
-  it.each(["/", "/ringkasan", "/impor/", "/login/extra", "/auth/set-password/extra", "/api/private"])("redirects unauthenticated %s to login", async (path) => {
+  it.each(["/", "/ringkasan", "/impor/", "/login/extra", "/auth/set-password/extra", "/auth/forgot-password/extra", "/auth/forgot-password-trick", "/auth/private", "/api/private"])("redirects unauthenticated %s to login", async (path) => {
     const response = await proxy(new NextRequest(`https://app.example${path}?next=https://evil.com`));
     expect(response.headers.get("location")).toBe("https://app.example/login");
   });
@@ -67,7 +84,7 @@ describe("Proxy matcher", () => {
   it.each(["/_next/static/chunk.js", "/_next/image?url=test.png", "/favicon.ico", "/logo.svg", "/photo.png", "/photo.jpg", "/photo.jpeg", "/photo.gif", "/photo.webp", "/font.woff2", "/styles.css", "/script.js", "/robots.txt", "/sitemap.xml", "/auth/callback", "/auth/callback/", "/auth/callback/resource"])("excludes %s", (url) => {
     expect(doesProxyMatch({ config, nextConfig: {}, url })).toBe(false);
   });
-  it.each(["/", "/login", "/login/", "/ringkasan/", "/auth/set-password", "/api/private", "/auth/callback-trick"])("covers %s", (url) => {
+  it.each(["/", "/login", "/login/", "/ringkasan/", "/auth/set-password", "/auth/forgot-password", "/auth/forgot-password/", "/api/private", "/auth/callback-trick"])("covers %s", (url) => {
     expect(doesProxyMatch({ config, nextConfig: {}, url })).toBe(true);
   });
 });

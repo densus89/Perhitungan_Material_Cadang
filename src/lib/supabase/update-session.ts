@@ -38,7 +38,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   }
 
   const path = request.nextUrl.pathname.replace(/\/+$/, "") || "/";
-  const publicRoute = path === "/login" || path === "/auth/callback" || path === "/auth/set-password";
+  const publicRoute = path === "/login" || path === "/auth/callback" || path === "/auth/set-password" || path === "/auth/forgot-password";
   const destination = !authenticated && !publicRoute ? "/login" : authenticated && path === "/login" ? "/ringkasan" : null;
 
   if (destination) {
