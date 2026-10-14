@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import AbcPage from "../../app/(workspace)/analisis-abc/page";
 import PolicyPage from "../../app/(workspace)/inventory-policy/page";
-import WorkspaceLayout from "../../app/(workspace)/layout";
+import { AuthenticatedDemoWorkspace as WorkspaceLayout } from "../fixtures/AuthenticatedDemoWorkspace";
 import { MappingReview } from "../../src/features/mapping/MappingReview";
 import { abcResults } from "../../src/demo/fixtures";
 

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ImportPage from "../../app/(workspace)/impor/page";
-import WorkspaceLayout from "../../app/(workspace)/layout";
+import { AuthenticatedDemoWorkspace as WorkspaceLayout } from "../fixtures/AuthenticatedDemoWorkspace";
 
 describe("metadata-only import demo", () => {
   it("displays local file metadata without reading or uploading its contents", () => {

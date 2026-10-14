@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import Home from "../../app/page";
+import SummaryPage from "../../app/(workspace)/ringkasan/page";
+import { AuthenticatedDemoWorkspace } from "../fixtures/AuthenticatedDemoWorkspace";
 
-describe("home page", () => {
+describe("authenticated landing workspace", () => {
   it("identifies the planning workspace and demonstration data", () => {
-    render(<Home />);
+    render(<AuthenticatedDemoWorkspace><SummaryPage /></AuthenticatedDemoWorkspace>);
 
     expect(
       screen.getByRole("heading", { name: "Perencanaan Material Cadang" }),

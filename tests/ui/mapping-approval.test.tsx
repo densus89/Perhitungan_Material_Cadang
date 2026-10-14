@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import MappingPage from "../../app/(workspace)/pemetaan-rfq/page";
-import WorkspaceLayout from "../../app/(workspace)/layout";
+import { AuthenticatedDemoWorkspace as WorkspaceLayout } from "../fixtures/AuthenticatedDemoWorkspace";
 
 function row(id: string) {
   return screen.getByRole("row", { name: new RegExp(id + "(?:\\s|$)") });

@@ -1,6 +1,10 @@
-import SummaryPage from "./(workspace)/ringkasan/page";
-import WorkspaceLayout from "./(workspace)/layout";
+import { redirect } from "next/navigation";
+import { createServerSupabaseClient } from "../src/lib/supabase/server";
+import { loadActor } from "../src/server/auth/actor";
 
-export default function Home() {
-  return <WorkspaceLayout><SummaryPage /></WorkspaceLayout>;
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const actor = await loadActor(await createServerSupabaseClient());
+  redirect(actor ? "/ringkasan/" : "/login/");
 }

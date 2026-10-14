@@ -1,0 +1,13 @@
+.header { flex-wrap: wrap; }
+.context { display: grid; gap: 8px; min-width: 0; flex: 1 1 260px; }
+.units { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.meta { flex-wrap: wrap; }
+.identity { display: grid; gap: 4px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.identity span { color: var(--muted); }
+.administration { margin-top: 28px; }
+@media (max-width: 720px) {
+  .context, .meta { width: 100%; }
+  .meta { justify-content: flex-start; }
+  .meta form { margin-left: auto; }
+  .administration { margin-top: 12px; }
+}

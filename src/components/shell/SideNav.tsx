@@ -2,7 +2,9 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChartNoAxesCombined, ClipboardCheck, Download, FileInput, LayoutDashboard, MapPin, PackageCheck, ScanLine, Zap } from "lucide-react";
+import { ChartNoAxesCombined, ClipboardCheck, Download, FileInput, LayoutDashboard, MapPin, PackageCheck, ScanLine, Users, Zap } from "lucide-react";
+import { useActor } from "../../state/AuthWorkspaceProvider";
+import styles from "./shell.module.css";
 
 const steps = [
   { label: "Ringkasan", href: "/ringkasan/", icon: LayoutDashboard },
@@ -15,6 +17,7 @@ const steps = [
 ];
 
 export function SideNav() {
+  const actor = useActor();
   const pathname = usePathname() ?? "/";
   const currentPath = pathname === "/" ? "/ringkasan" : pathname.replace(/\/$/, "");
 
@@ -32,7 +35,11 @@ export function SideNav() {
           </Link>
         ))}
       </nav>
-      <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div><strong>Lingkungan demonstrasi</strong><p>Seluruh data bersifat sintetis.</p></div></div>
+      {actor.role === "RST_ADMIN" && <section className={styles.administration}>
+        <p className="nav-section-label">ADMINISTRASI</p>
+        <nav aria-label="Administrasi"><Link href="/admin/pengguna/" aria-current={currentPath === "/admin/pengguna" ? "page" : undefined}><Users size={18} aria-hidden="true" /><span>Kelola Pengguna</span></Link></nav>
+      </section>}
+      <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div><strong>Perencanaan Data Demo</strong><p>Modul perencanaan memakai data sintetis.</p></div></div>
     </aside>
   );
 }

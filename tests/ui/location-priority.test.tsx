@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import LocationPage from "../../app/(workspace)/prioritas-lokasi/page";
-import WorkspaceLayout from "../../app/(workspace)/layout";
+import { AuthenticatedDemoWorkspace as WorkspaceLayout } from "../fixtures/AuthenticatedDemoWorkspace";
 import { locationPriorities, policyRows } from "../../src/demo/fixtures";
 
 function table() { return screen.getByRole("table", { name: "Prioritas penempatan UPT / GI" }); }

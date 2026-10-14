@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RouterContext } from "next/dist/shared/lib/router-context.shared-runtime";
 import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import type { NextRouter } from "next/router";
-import WorkspaceLayout from "../../app/(workspace)/layout";
+import { AuthenticatedWorkspace } from "../../src/features/auth/AuthenticatedWorkspace";
+import { workspaceActor } from "../fixtures/workspace-actor";
 import ImportPage from "../../app/(workspace)/impor/page";
 import MappingPage from "../../app/(workspace)/pemetaan-rfq/page";
 import SummaryPage from "../../app/(workspace)/ringkasan/page";
+
+vi.mock("../../app/auth/actions", () => ({ logoutAction: async () => ({ status: "idle" }) }));
 
 /** Only the router boundary is supplied; all links, views, and demo state are real. */
 function ClientNavigationWorkspace({ initialPath = "/impor/" }: { initialPath?: string }) {
@@ -22,7 +25,7 @@ function ClientNavigationWorkspace({ initialPath = "/impor/" }: { initialPath?: 
   };
   return <RouterContext.Provider value={router}><PathnameContext.Provider value={path}>
     <output aria-label="Rute aktif">{path}</output>
-    <WorkspaceLayout>{path === "/impor/" ? <ImportPage /> : path === "/pemetaan-rfq/" ? <MappingPage /> : path === "/ringkasan/" ? <SummaryPage /> : <p>Tujuan alur: {path}</p>}</WorkspaceLayout>
+    <AuthenticatedWorkspace actor={workspaceActor}>{path === "/impor/" ? <ImportPage /> : path === "/pemetaan-rfq/" ? <MappingPage /> : path === "/ringkasan/" ? <SummaryPage /> : <p>Tujuan alur: {path}</p>}</AuthenticatedWorkspace>
   </PathnameContext.Provider></RouterContext.Provider>;
 }
 

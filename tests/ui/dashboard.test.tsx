@@ -1,10 +1,18 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import Home from "../../app/page";
+import { describe, expect, it, vi } from "vitest";
+import { AuthenticatedWorkspace } from "../../src/features/auth/AuthenticatedWorkspace";
+import SummaryPage from "../../app/(workspace)/ringkasan/page";
+import { workspaceActor } from "../fixtures/workspace-actor";
+
+vi.mock("../../app/auth/actions", () => ({ logoutAction: async () => ({ status: "idle" }) }));
+
+function Dashboard() {
+  return <AuthenticatedWorkspace actor={workspaceActor}><SummaryPage /></AuthenticatedWorkspace>;
+}
 
 describe("dashboard workspace", () => {
   it("provides navigation to every planning step and identifies synthetic data", () => {
-    render(<Home />);
+    render(<Dashboard />);
 
     const navigation = screen.getByRole("navigation", { name: "Navigasi utama" });
     expect(screen.getByText("Data Demo")).toBeVisible();
@@ -22,7 +30,7 @@ describe("dashboard workspace", () => {
   });
 
   it("shows fixture totals with clear approval and missing-data status", () => {
-    render(<Home />);
+    render(<Dashboard />);
 
     expect(within(screen.getByRole("article", { name: "Material dianalisis" })).getByText("8")).toBeVisible();
     expect(within(screen.getByRole("article", { name: "Populasi aset" })).getByText("259")).toBeVisible();
@@ -33,7 +41,7 @@ describe("dashboard workspace", () => {
   });
 
   it("exposes every ABC class and the chart values in semantic tables", () => {
-    render(<Home />);
+    render(<Dashboard />);
 
     const distribution = screen.getByRole("table", { name: "Distribusi kelas ABC" });
     for (const category of ["A1", "A2", "B1", "B2", "C"]) {
