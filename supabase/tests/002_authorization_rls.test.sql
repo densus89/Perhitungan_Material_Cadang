@@ -25,6 +25,12 @@ exception when insufficient_privilege then return -1;
 end;
 $$;
 
+-- Unrelated legitimate records make whole-table fixture counts unsafe. These
+-- transaction-only sentinels prove account administration does not break RLS QA.
+insert into auth.users (id, email) values
+  ('39000000-0000-4000-8000-000000000001', 'rls.unrelated@pln.co.id');
+insert into public.audit_events (action, target_type) values ('unrelated_account_event', 'profile');
+
 insert into auth.users (id, email, raw_user_meta_data) values
   ('30000000-0000-4000-8000-000000000001', 'rls.admin@pln.co.id', '{}'),
   ('30000000-0000-4000-8000-000000000002', 'rls.reviewer@pln.co.id', '{}'),
@@ -101,13 +107,13 @@ reset role;
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000001', true);
 set local role authenticated;
-select is(pg_temp.visible('select count(*) from public.profiles'), 10::bigint, 'Admin reads every profile');
-select is(pg_temp.visible('select count(*) from public.user_role_assignments'), 9::bigint, 'Admin reads every role');
-select is(pg_temp.visible('select count(*) from public.user_unit_assignments'), 2::bigint, 'Admin reads every assignment');
-select is(pg_temp.visible('select count(*) from public.datasets'), 2::bigint, 'Admin reads both units datasets');
-select is(pg_temp.visible('select count(*) from public.dataset_versions'), 3::bigint, 'Admin reads all versions');
-select is(pg_temp.visible('select count(*) from public.approval_events'), 2::bigint, 'Admin reads all approvals');
-select is(pg_temp.visible('select count(*) from public.audit_events'), 1::bigint, 'Admin reads audit history');
+select is(pg_temp.visible($sql$ select count(*) from public.profiles where id between '30000000-0000-4000-8000-000000000001' and '30000000-0000-4000-8000-000000000010' $sql$), 10::bigint, 'Admin reads every fixture profile');
+select is(pg_temp.visible($sql$ select count(*) from public.user_role_assignments where user_id between '30000000-0000-4000-8000-000000000001' and '30000000-0000-4000-8000-000000000010' $sql$), 9::bigint, 'Admin reads every fixture role');
+select is(pg_temp.visible($sql$ select count(*) from public.user_unit_assignments where user_id between '30000000-0000-4000-8000-000000000001' and '30000000-0000-4000-8000-000000000010' $sql$), 2::bigint, 'Admin reads every fixture assignment');
+select is(pg_temp.visible($sql$ select count(*) from public.datasets where id in ('32000000-0000-4000-8000-000000000001', '32000000-0000-4000-8000-000000000002') $sql$), 2::bigint, 'Admin reads both fixture units datasets');
+select is(pg_temp.visible($sql$ select count(*) from public.dataset_versions where id in ('33000000-0000-4000-8000-000000000001', '33000000-0000-4000-8000-000000000002', '33000000-0000-4000-8000-000000000003') $sql$), 3::bigint, 'Admin reads all fixture versions');
+select is(pg_temp.visible($sql$ select count(*) from public.approval_events where dataset_version_id in ('33000000-0000-4000-8000-000000000002', '33000000-0000-4000-8000-000000000003') $sql$), 2::bigint, 'Admin reads all fixture approvals');
+select is(pg_temp.visible($sql$ select count(*) from public.audit_events where action = 'synthetic_fixture' and target_id = '32000000-0000-4000-8000-000000000001' $sql$), 1::bigint, 'Admin reads fixture audit history');
 select ok(pg_temp.changed($sql$ update public.profiles set status = 'DISABLED' where id = '30000000-0000-4000-8000-000000000002' $sql$) <= 0, 'Even admin client cannot bypass audited profile management');
 select ok(pg_temp.changed($sql$ update public.user_role_assignments set role = 'RST_ADMIN' where user_id = '30000000-0000-4000-8000-000000000002' $sql$) <= 0, 'Even admin client cannot directly manage roles');
 select ok(pg_temp.changed($sql$ delete from public.user_unit_assignments where user_id = '30000000-0000-4000-8000-000000000003' $sql$) <= 0, 'Even admin client cannot directly manage unit assignments');
@@ -124,9 +130,9 @@ reset role;
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000002', true);
 set local role authenticated;
-select is(pg_temp.visible('select count(*) from public.datasets'), 2::bigint, 'Reviewer reads both units datasets');
-select is(pg_temp.visible('select count(*) from public.dataset_versions'), 3::bigint, 'Reviewer reads every version');
-select is(pg_temp.visible('select count(*) from public.approval_events'), 2::bigint, 'Reviewer reads all approval details');
+select is(pg_temp.visible($sql$ select count(*) from public.datasets where id in ('32000000-0000-4000-8000-000000000001', '32000000-0000-4000-8000-000000000002') $sql$), 2::bigint, 'Reviewer reads both fixture units datasets');
+select is(pg_temp.visible($sql$ select count(*) from public.dataset_versions where id in ('33000000-0000-4000-8000-000000000001', '33000000-0000-4000-8000-000000000002', '33000000-0000-4000-8000-000000000003') $sql$), 3::bigint, 'Reviewer reads every fixture version');
+select is(pg_temp.visible($sql$ select count(*) from public.approval_events where dataset_version_id in ('33000000-0000-4000-8000-000000000002', '33000000-0000-4000-8000-000000000003') $sql$), 2::bigint, 'Reviewer reads all fixture approval details');
 select is(pg_temp.visible('select count(*) from public.profiles'), 1::bigint, 'Reviewer only reads own profile');
 select is(pg_temp.visible('select count(*) from public.user_role_assignments'), 1::bigint, 'Reviewer only reads own role');
 select is(pg_temp.visible('select count(*) from public.user_unit_assignments'), 0::bigint, 'Reviewer cannot enumerate unit assignments');
@@ -235,7 +241,7 @@ set local role authenticated;
 select is(pg_temp.visible('select count(*) from public.profiles'), 0::bigint, 'Authenticated database role without user identity grants no access');
 reset role;
 set local role service_role;
-select is(pg_temp.visible('select count(*) from public.profiles'), 10::bigint, 'Server service role retains profile management access');
+select is(pg_temp.visible($sql$ select count(*) from public.profiles where id between '30000000-0000-4000-8000-000000000001' and '30000000-0000-4000-8000-000000000010' $sql$), 10::bigint, 'Server service role retains fixture profile management access');
 select lives_ok($sql$ insert into public.audit_events (action, target_type) values ('synthetic_server_event', 'test') $sql$, 'Server can append trusted audit events');
 reset role;
 select * from finish();
