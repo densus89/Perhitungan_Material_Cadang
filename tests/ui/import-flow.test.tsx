@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import ImportPage from "../../app/(workspace)/impor/page";
 import { AuthenticatedDemoWorkspace as WorkspaceLayout } from "../fixtures/AuthenticatedDemoWorkspace";
 
 describe("metadata-only import demo", () => {
   it("displays local file metadata without reading or uploading its contents", () => {
-    render(<WorkspaceLayout><ImportPage /></WorkspaceLayout>);
+    render(<PathnameContext.Provider value="/impor/"><WorkspaceLayout><ImportPage /></WorkspaceLayout></PathnameContext.Provider>);
     const file = new File(["PRIVATE_CONTENT_MUST_NOT_APPEAR"], "contoh-lokal.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const readText = vi.fn(() => { throw new Error("Content reads are forbidden"); });
     const readBuffer = vi.fn(() => { throw new Error("Content reads are forbidden"); });

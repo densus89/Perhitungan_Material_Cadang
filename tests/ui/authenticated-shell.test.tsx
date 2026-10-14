@@ -37,6 +37,17 @@ describe("authenticated workspace shell", () => {
     expect(screen.queryByLabelText("Pengguna demo")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["", "bootstrap.admin@pln.co.id", "Bootstrap Admin", "BA"],
+    ["   ", "rst_operator+awal@pln.co.id", "Rst Operator", "RO"],
+  ])("derives a readable identity from email when displayName is %j", (displayName, email, label, initials) => {
+    render(<AuthenticatedWorkspace actor={{ ...workspaceActor, displayName, email }}><p>Konten</p></AuthenticatedWorkspace>);
+    const header = screen.getByRole("banner");
+    expect(within(header).getByText(label)).toBeVisible();
+    expect(within(header).getByText(email)).toBeVisible();
+    expect(within(header).getByText(initials)).toBeVisible();
+  });
+
   it("shows only assigned Unit Induk names", () => {
     render(<AuthenticatedWorkspace actor={workspaceActor} units={[...workspaceUnits, { id: "unassigned", name: "Unit Lain" }]}><p>Konten</p></AuthenticatedWorkspace>);
     const units = screen.getByLabelText("Unit Induk ditugaskan");
@@ -57,6 +68,11 @@ describe("authenticated workspace shell", () => {
     expect(within(nav).getByRole("link", { name: "Kelola Pengguna" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("does not label the real admin workspace as demo data", () => {
+    render(<PathnameContext.Provider value="/admin/pengguna/"><AuthenticatedWorkspace actor={{ ...workspaceActor, role: "RST_ADMIN" }}><p>Admin</p></AuthenticatedWorkspace></PathnameContext.Provider>);
+    expect(screen.queryByText("Data Demo")).not.toBeInTheDocument();
+  });
+
   it.each<AppRole>(["RST_REVIEWER", "UNIT_OPERATOR", "VIEWER"])("does not show admin navigation to %s", (role) => {
     render(<AuthenticatedWorkspace actor={{ ...workspaceActor, role }}><p>Konten</p></AuthenticatedWorkspace>);
     expect(screen.queryByRole("link", { name: "Kelola Pengguna" })).not.toBeInTheDocument();
@@ -70,10 +86,10 @@ describe("authenticated workspace shell", () => {
   });
 
   it.each([
-    ["ringkasan", SummaryPage], ["impor", ImportPage], ["pemetaan-rfq", MappingPage],
-    ["analisis-abc", AbcPage], ["inventory-policy", PolicyPage], ["prioritas-lokasi", LocationPage], ["ekspor", ExportPage],
-  ])("keeps the visible Data Demo warning on authenticated %s", (_name, Page) => {
-    render(<AuthenticatedWorkspace actor={workspaceActor}><Page /></AuthenticatedWorkspace>);
+    ["/ringkasan/", SummaryPage], ["/impor/", ImportPage], ["/pemetaan-rfq/", MappingPage],
+    ["/analisis-abc/", AbcPage], ["/inventory-policy/", PolicyPage], ["/prioritas-lokasi/", LocationPage], ["/ekspor/", ExportPage],
+  ])("keeps the visible Data Demo warning on authenticated %s", (pathname, Page) => {
+    render(<PathnameContext.Provider value={pathname}><AuthenticatedWorkspace actor={workspaceActor}><Page /></AuthenticatedWorkspace></PathnameContext.Provider>);
     expect(screen.getByText("Data Demo")).toBeVisible();
     expect(screen.getByRole("main")).toBeInTheDocument();
   });

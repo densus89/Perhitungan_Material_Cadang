@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { AuthenticatedWorkspace } from "../../src/features/auth/AuthenticatedWorkspace";
 import SummaryPage from "../../app/(workspace)/ringkasan/page";
 import { workspaceActor } from "../fixtures/workspace-actor";
@@ -7,7 +8,7 @@ import { workspaceActor } from "../fixtures/workspace-actor";
 vi.mock("../../app/auth/actions", () => ({ logoutAction: async () => ({ status: "idle" }) }));
 
 function Dashboard() {
-  return <AuthenticatedWorkspace actor={workspaceActor}><SummaryPage /></AuthenticatedWorkspace>;
+  return <PathnameContext.Provider value="/ringkasan/"><AuthenticatedWorkspace actor={workspaceActor}><SummaryPage /></AuthenticatedWorkspace></PathnameContext.Provider>;
 }
 
 describe("dashboard workspace", () => {
