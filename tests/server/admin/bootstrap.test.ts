@@ -9,6 +9,10 @@ describe("local bootstrap guards", () => {
     for (const key of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "BOOTSTRAP_ADMIN_EMAIL"]) expect(() => parseBootstrapConfig({ ...env, [key]: "" }, ["--confirm"])).toThrow();
     expect(parseBootstrapConfig(env, ["--confirm"]).email).toBe("admin@pln.co.id");
   });
+  it("allows only the explicitly approved Gmail guest for bootstrap", () => {
+    expect(parseBootstrapConfig({ ...env, BOOTSTRAP_ADMIN_EMAIL: " Sitompul89@GMAIL.COM " }, ["--confirm"]).email).toBe("sitompul89@gmail.com");
+    expect(() => parseBootstrapConfig({ ...env, BOOTSTRAP_ADMIN_EMAIL: "other@gmail.com" }, ["--confirm"])).toThrow(/email/i);
+  });
   it("refuses a second active admin unless explicitly allowed", async () => {
     const calls: string[] = [];
     const gateway = { hasActiveAdmin: async () => true, findProfile: async () => null, invite: async () => { calls.push("invite"); return "new-user"; }, stage: async () => { calls.push("stage"); }, restore: async () => { calls.push("restore"); }, assign: async () => { calls.push("assign"); }, remove: async () => { calls.push("remove"); }, audit: async () => { calls.push("audit"); } };

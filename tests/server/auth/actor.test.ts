@@ -82,6 +82,14 @@ describe("actor loading", () => {
     expect(await loadActor(clientWith({ user }).client)).toBeNull();
   });
 
+  it("loads the approved Gmail guest when Auth and profile emails match", async () => {
+    const email = "sitompul89@gmail.com";
+    const { client } = clientWith();
+    const auth = await client.auth.getUser();
+    const user = { ...auth.data.user!, email };
+    expect(await loadActor(clientWith({ user, profiles: [{ id: "auth-user", email, display_name: "Guest", status: "ACTIVE" }] }).client)).toMatchObject({ email });
+  });
+
   it("allows no assigned units without granting metadata units", async () => {
     expect(await loadActor(clientWith({ user_unit_assignments: [] }).client)).toMatchObject({ unitIndukIds: [] });
   });

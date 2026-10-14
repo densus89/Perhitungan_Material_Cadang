@@ -23,8 +23,11 @@ export function normalizePlnEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+const explicitlyAllowedGuestEmails = new Set(["sitompul89@gmail.com"]);
+
 export function isAllowedPlnEmail(email: string): boolean {
-  return /^[^\s@]+@pln\.co\.id$/.test(normalizePlnEmail(email));
+  const normalized = normalizePlnEmail(email);
+  return /^[^\s@]+@pln\.co\.id$/.test(normalized) || explicitlyAllowedGuestEmails.has(normalized);
 }
 
 /** Unit-scoped permissions still require an assignment check at the operation. */

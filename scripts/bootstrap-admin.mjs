@@ -9,7 +9,8 @@ export function parseBootstrapConfig(env, args) {
     if (typeof env[key] !== "string" || !env[key].trim()) throw new Error(`Missing configuration: ${key}`);
   }
   const email = env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
-  if (email.length > 254 || !/^[^\s@]+@pln\.co\.id$/.test(email)) throw new Error("Bootstrap email must use the exact PLN domain");
+  const isAllowedEmail = /^[^\s@]+@pln\.co\.id$/.test(email) || email === "sitompul89@gmail.com";
+  if (email.length > 254 || !isAllowedEmail) throw new Error("Bootstrap email is not allowed");
   for (const key of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SITE_URL"]) {
     let url;
     try { url = new URL(env[key]); } catch { throw new Error(`Invalid configuration: ${key}`); }

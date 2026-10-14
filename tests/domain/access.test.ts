@@ -7,6 +7,12 @@ describe("PLN email boundary", () => {
     expect(isAllowedPlnEmail("  Operator@PLN.CO.ID  ")).toBe(true);
   });
 
+  it("allows only the explicitly approved Gmail guest account", () => {
+    expect(isAllowedPlnEmail("  Sitompul89@GMAIL.COM  ")).toBe(true);
+    expect(isAllowedPlnEmail("other@gmail.com")).toBe(false);
+    expect(isAllowedPlnEmail("sitompul89+alias@gmail.com")).toBe(false);
+  });
+
   it.each(["user@gmail.com", "user@sub.pln.co.id", "user@pln.co.id.evil.com", "@pln.co.id", "", "user@@pln.co.id", "two words@pln.co.id"])("rejects %s", (email) => {
     expect(isAllowedPlnEmail(email)).toBe(false);
   });

@@ -34,6 +34,15 @@ describe("PLN authentication service", () => {
     expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: "operator@pln.co.id", password: "  private password  " });
   });
 
+  it("allows and normalizes the approved Gmail guest for sign-in and recovery", async () => {
+    const client = gateway();
+    const email = "  Sitompul89@GMAIL.COM  ";
+    expect(await signIn({ email, password: passwords.password }, client)).toMatchObject({ status: "success" });
+    expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: "sitompul89@gmail.com", password: passwords.password });
+    expect(await requestPasswordReset({ email, siteUrl: "http://localhost:3000" }, client)).toMatchObject({ status: "success" });
+    expect(client.auth.resetPasswordForEmail).toHaveBeenCalledWith("sitompul89@gmail.com", { redirectTo: "http://localhost:3000/auth/callback?next=/auth/set-password" });
+  });
+
   it("rejects missing passwords without calling Auth", async () => {
     const client = gateway();
     expect(await signIn({ email: "user@pln.co.id", password: "" }, client)).toMatchObject({ status: "error", fieldErrors: { password: expect.any(String) } });

@@ -33,7 +33,7 @@ export const logoutFailure: AuthFormState = {
 
 export function validateEmail(email: string): AuthFormState | null {
   return isAllowedPlnEmail(email) ? null : {
-    status: "error", fieldErrors: { email: "Gunakan email dengan domain @pln.co.id." },
+    status: "error", fieldErrors: { email: "Gunakan email @pln.co.id atau akun tamu yang diizinkan." },
   };
 }
 

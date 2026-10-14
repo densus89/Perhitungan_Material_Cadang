@@ -11,7 +11,7 @@ const unitIssue = { message: "UNIT_OPERATOR memerlukan setidaknya satu Unit Indu
 export const userAccessSchema = z.object(accessFields).strict().refine(requireOperatorUnits, unitIssue);
 export const inviteUserSchema = z.object({
   ...accessFields,
-  email: z.string().max(254).transform(normalizePlnEmail).refine(isAllowedPlnEmail, "Gunakan email dengan domain @pln.co.id."),
+  email: z.string().max(254).transform(normalizePlnEmail).refine(isAllowedPlnEmail, "Gunakan email @pln.co.id atau akun tamu yang diizinkan."),
   displayName: z.string().trim().min(1).max(150),
 }).strict().refine(requireOperatorUnits, unitIssue);
 export const updateUserAccessSchema = z.object({
