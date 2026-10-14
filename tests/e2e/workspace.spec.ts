@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { E2E_IDENTITIES } from "./support/environment";
+import { loginAs } from "./support/session";
+
+test.beforeEach(async ({ page }) => {
+  await loginAs(page, E2E_IDENTITIES.operator.email);
+});
 
 test("dashboard to approval, policy, P0 locations, and current demo export", async ({ page }) => {
   await page.goto("/");

@@ -9,13 +9,14 @@
   },
   "scripts": {
     "dev": "next dev",
+    "start": "next start",
     "test": "vitest run",
     "lint": "eslint . --max-warnings=0",
     "build": "next build",
     "test:e2e": "playwright test",
     "supabase": "supabase",
     "db:test": "node scripts/db-test.mjs",
-    "db:lint": "supabase db lint --linked",
+    "db:lint": "supabase db lint --linked --schema public,private --fail-on error",
     "db:types": "supabase gen types typescript --linked --schema public"
   },
   "dependencies": {

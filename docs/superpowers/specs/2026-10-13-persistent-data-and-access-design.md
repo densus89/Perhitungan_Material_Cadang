@@ -72,7 +72,7 @@ Supabase Free digunakan untuk pengembangan dan uji operasional awal. Aplikasi ha
 
 - Tidak ada halaman pendaftaran publik.
 - Akun hanya dibuat atau diundang oleh DIV RST Admin.
-- Email wajib memiliki domain persis `@pln.co.id`.
+- Email wajib memiliki domain persis `@pln.co.id`, kecuali satu akun guest/uji coba yang disetujui secara eksplisit: `sitompul89@gmail.com`. Tidak ada Gmail lain atau alias yang diizinkan.
 - Pembatasan domain diperiksa di sisi server, bukan hanya di formulir.
 - Pengguna menerima tautan verifikasi dan membuat kata sandi sendiri.
 - Pemulihan kata sandi dilakukan melalui email PLN.
@@ -365,7 +365,7 @@ Email digunakan untuk undangan akun, verifikasi, dan pemulihan kata sandi. Email
 
 - Penyimpanan menggunakan layanan eksternal.
 - Supabase menjadi pilihan utama untuk MVP.
-- Akun bersifat invite-only dan terbatas ke `@pln.co.id`.
+- Akun bersifat invite-only dan terbatas ke `@pln.co.id`, dengan pengecualian tunggal guest/uji coba `sitompul89@gmail.com`.
 - DIV RST membuat akun serta menyetujui dataset.
 - Operator dapat melihat ringkasan nasional tetapi hanya mengubah unitnya sendiri.
 - Setiap pembaruan merupakan snapshot lengkap.

@@ -10,15 +10,18 @@ import { Badge } from "../../components/ui/Badge";
 /** Native modal behavior makes the background inert; explicit Tab cycling keeps focus on dialog controls. */
 export function DemoModal({ title, onClose, children, drawer = false }: { title: string; onClose: () => void; children: ReactNode; drawer?: boolean }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
-    const previous = document.activeElement;
+    if (!returnFocusRef.current && document.activeElement instanceof HTMLElement) {
+      returnFocusRef.current = document.activeElement;
+    }
     if (dialog && !dialog.open) {
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.setAttribute("open", "");
       dialog.querySelector<HTMLElement>("button, select, input, a[href]")?.focus();
     }
-    return () => { if (previous instanceof HTMLElement) previous.focus(); };
+    return () => { returnFocusRef.current?.focus(); };
   }, []);
 
   return <dialog ref={dialogRef} className={`demo-modal${drawer ? " demo-modal--drawer" : ""}`} aria-label={title} onCancel={(event) => { event.preventDefault(); onClose(); }} onKeyDown={(event) => {

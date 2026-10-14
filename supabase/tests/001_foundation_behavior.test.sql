@@ -25,6 +25,8 @@ select throws_ok($sql$ insert into auth.users (id, email) values ('10000000-0000
 select throws_ok($sql$ insert into auth.users (id, email) values ('10000000-0000-4000-8000-000000000003', '@pln.co.id') $sql$, '23514', null, 'Rejects missing local part');
 select throws_ok($sql$ update public.profiles set email = 'synthetic@example.invalid' where id = '10000000-0000-4000-8000-000000000001' $sql$, '23514', null, 'Profile updates enforce domain');
 select throws_ok($sql$ update public.profiles set email = 'SYNTHETIC@PLN.CO.ID' where id = '10000000-0000-4000-8000-000000000001' $sql$, '23514', null, 'Stored profile email must already be normalized');
+select lives_ok($sql$ insert into auth.users (id, email) values ('10000000-0000-4000-8000-000000000004', 'sitompul89@gmail.com') $sql$, 'Allows the single approved Gmail guest');
+select throws_ok($sql$ insert into auth.users (id, email) values ('10000000-0000-4000-8000-000000000005', 'other@gmail.com') $sql$, '23514', null, 'Rejects every other Gmail account');
 
 select throws_ok($sql$ select public.activate_my_profile() $sql$, '42501', null, 'Missing authentication cannot activate a profile');
 set local role anon;
