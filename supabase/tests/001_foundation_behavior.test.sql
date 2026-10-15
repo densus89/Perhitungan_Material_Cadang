@@ -26,7 +26,11 @@ select throws_ok($sql$ insert into auth.users (id, email) values ('10000000-0000
 select throws_ok($sql$ update public.profiles set email = 'synthetic@example.invalid' where id = '10000000-0000-4000-8000-000000000001' $sql$, '23514', null, 'Profile updates enforce domain');
 select throws_ok($sql$ update public.profiles set email = 'SYNTHETIC@PLN.CO.ID' where id = '10000000-0000-4000-8000-000000000001' $sql$, '23514', null, 'Stored profile email must already be normalized');
 select throws_ok($sql$ update auth.users set email = 'foundation.changed@pln.co.id' where id = '10000000-0000-4000-8000-000000000001' $sql$, '22023', null, 'Phase-one identities cannot change email');
-select lives_ok($sql$ insert into auth.users (id, email) values ('10000000-0000-4000-8000-000000000004', 'sitompul89@gmail.com') $sql$, 'Allows the single approved Gmail guest');
+-- Exercise the production email CHECK without colliding with the real approved
+-- guest identity. LIKE copies CHECK/NOT NULL/defaults, not live rows or indexes.
+create temporary table foundation_profile_email_policy (like public.profiles including constraints including defaults) on commit drop;
+select lives_ok($sql$ insert into pg_temp.foundation_profile_email_policy (id, email) values ('10000000-0000-4000-8000-000000000004', 'sitompul89@gmail.com') $sql$, 'Allows the single approved Gmail guest without touching a real identity');
+select throws_ok($sql$ insert into pg_temp.foundation_profile_email_policy (id, email) values ('10000000-0000-4000-8000-000000000006', 'unapproved.gmail.policy@gmail.com') $sql$, '23514', null, 'Copied production CHECK still rejects an unapproved Gmail address');
 select throws_ok($sql$ insert into auth.users (id, email) values ('10000000-0000-4000-8000-000000000005', 'other@gmail.com') $sql$, '23514', null, 'Rejects every other Gmail account');
 
 select throws_ok($sql$ select public.activate_my_profile() $sql$, '42501', null, 'Missing authentication cannot activate a profile');
