@@ -10,7 +10,7 @@ Sistem akan menerima satu workbook lengkap sebagai snapshot data aset suatu unit
 
 Sheet `3400` diperlakukan sebagai salah satu format sumber lama, bukan nama sheet baku. Untuk penggunaan berikutnya, sistem menyediakan template Excel standar. Importer tetap mendukung workbook lama yang kolom, posisi header, atau nama sheet-nya berbeda selama pemetaan dapat ditentukan secara aman.
 
-Nilai untuk ABC menggunakan nilai buku SAP aktual sebagai prioritas. Bila tidak tersedia, sistem menggunakan nilai buku penyesuaian yang diberikan dan dapat dipertanggungjawabkan. Jika keduanya tidak tersedia, sistem menghitung nilai terdepresiasi dari harga referensi, usia aset, dan masa manfaat. Harga referensi dapat diestimasi dari aset sejenis dengan kecocokan teknis sebagai syarat utama dan kedekatan lokasi sebagai urutan pencarian.
+Nilai untuk klasifikasi ABC menggunakan nilai buku SAP aktual sebagai prioritas. Bila tidak tersedia, sistem menggunakan nilai buku penyesuaian yang diberikan dan dapat dipertanggungjawabkan. Jika keduanya tidak tersedia, sistem menghitung estimasi nilai buku terdepresiasi dari harga referensi, usia aset, dan masa manfaat. Harga referensi dapat diestimasi dari aset sejenis dengan kecocokan teknis sebagai syarat utama dan kedekatan lokasi sebagai urutan pencarian. Harga pengadaan baru tidak dipakai langsung sebagai nilai klasifikasi ABC; nilainya dipertahankan sebagai input tahap inventory policy setelah kelas ABC terbentuk.
 
 Dokumen PERDIR 0299.P/DIR/2016 digunakan sebagai referensi masa manfaat akuntansi, bukan sebagai keputusan teknis bahwa aset harus dipensiunkan pada usia tertentu.
 
@@ -44,12 +44,25 @@ Termasuk dalam fase ini:
 
 Tidak termasuk dalam fase ini:
 
-- mesin lengkap normalisasi RFQ dan perhitungan ABC A1/A2/B1/B2;
+- mesin lengkap normalisasi RFQ dan perhitungan ABC A1/A2/B1/B2/C;
 - pengolahan histori gangguan atau penggantian enam tahun;
 - keputusan teknis penghapusan atau retirement aset;
 - revaluasi dengan indeks inflasi yang belum memiliki sumber resmi;
 - sinkronisasi langsung dengan SAP atau Google Sheets;
 - dashboard nasional final dan seluruh logika alokasi material cadang.
+
+### 3.1 Kontrak dengan perhitungan ABC dan inventory policy
+
+Snapshot aset dari fase ini menjadi input bagi mesin ABC pada fase berikutnya. Mesin tersebut wajib menghasilkan tepat lima kelas: `A1`, `A2`, `B1`, `B2`, dan `C`. Seluruh kelas tetap disimpan, ditampilkan, dan dapat diaudit.
+
+Kelas `C` tetap merupakan hasil klasifikasi yang sah, tetapi tidak diteruskan ke perhitungan alokasi material cadang. Tidak ada pengecualian berdasarkan jenis peralatan atau lead time setelah suatu kelompok ditetapkan sebagai kelas C.
+
+Nilai klasifikasi ABC dan harga pengadaan baru memiliki fungsi berbeda:
+
+- klasifikasi ABC menggunakan nilai buku SAP, nilai buku penyesuaian yang sah, atau estimasi nilai buku terdepresiasi;
+- harga pengadaan baru disimpan terpisah dan digunakan setelah kelas ABC diperoleh;
+- pada kebijakan saat ini, harga pengadaan baru digunakan untuk menghitung material cadang ketika inventory policy adalah **Optimum Spare**, yang berlaku untuk kelas `A2` dan `B1`;
+- harga pengadaan baru tidak boleh menggantikan nilai buku secara langsung hanya agar suatu kelompok memperoleh kelas ABC tertentu.
 
 ## 4. Pendekatan yang dipilih
 
@@ -129,7 +142,7 @@ Nama `DATA_ASET` adalah standar baru. Importer tidak menjadikan nama tersebut se
 | `KODE_JENIS` | Kondisional | Kode jenis sesuai referensi |
 | `KODE_SUBJENIS` | Kondisional | Kode subjenis sesuai referensi |
 | `NILAI_BUKU_SAP` | Kondisional | Sumber nilai utama bila tersedia; nol adalah nilai sah |
-| `HARGA_PENGADAAN_SAAT_INI` | Kondisional | Harga penggantian/referensi terkini |
+| `HARGA_PENGADAAN_SAAT_INI` | Kondisional | Harga pengadaan baru/referensi terkini; disimpan untuk Optimum Spare dan dapat menjadi dasar estimasi nilai buku terdepresiasi bila nilai buku tidak tersedia |
 | `TANGGAL_REFERENSI_HARGA` | Kondisional | Tanggal dasar harga |
 | `NILAI_BUKU_PENYESUAIAN` | Opsional legacy | Nilai yang diberikan sumber lama, tetap diaudit |
 | `KODE_MATERIAL` | Opsional | Kode material bila tersedia |
@@ -191,13 +204,13 @@ Pemetaan yang ambigu memblokir estimasi nilai otomatis pada baris terkait, tetap
 
 ## 9. Resolusi nilai ABC
 
-Nama internal yang digunakan adalah `nilaiABC`, bukan `acquisitionValue`, karena angka yang dipakai dapat berupa nilai buku atau estimasi terdepresiasi.
+Nama internal yang digunakan untuk nilai klasifikasi adalah `nilaiABC`, bukan `acquisitionValue`, karena angka yang dipakai harus berupa nilai buku atau estimasi nilai buku terdepresiasi. Harga pengadaan baru disimpan pada field terpisah dan tidak masuk langsung ke agregasi nilai klasifikasi.
 
 Urutan sumber nilai:
 
 1. `SAP_BOOK_VALUE`: nilai buku SAP aktual;
 2. `PROVIDED_ADJUSTED_VALUE`: nilai buku penyesuaian dari sumber yang lolos validasi;
-3. `SYSTEM_DEPRECIATION`: depresiasi dari harga referensi aktual;
+3. `SYSTEM_DEPRECIATION`: estimasi nilai buku terdepresiasi dari harga referensi aktual;
 4. `ESTIMATED_SAME_GI`: harga pembanding teknis dari GI yang sama;
 5. `ESTIMATED_SAME_UPT`: harga pembanding dari UPT yang sama;
 6. `ESTIMATED_NEAREST_LOCATION`: harga pembanding dari lokasi terdekat;
@@ -218,6 +231,8 @@ Aturan penting:
 - nilai negatif, tak hingga, token error, atau teks yang tidak dapat diparse adalah tidak sah;
 - nilai buku SAP nol tidak dianggap kosong;
 - nilai akhir hasil formula workbook lama bukan sumber kebenaran dan hanya dipakai untuk rekonsiliasi;
+- harga pengadaan baru mentah tidak dipakai langsung untuk menentukan kelas ABC;
+- setelah klasifikasi selesai, harga pengadaan baru dapat dikonsumsi oleh perhitungan Optimum Spare untuk kelas A2 dan B1;
 - kondisi P0-P4 tidak digunakan untuk menebak usia;
 - setiap hasil menyimpan sumber nilai, rule version, input, dan waktu perhitungan.
 
