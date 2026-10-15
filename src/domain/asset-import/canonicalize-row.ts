@@ -4,6 +4,9 @@ import { parseAssetDate, parseLocalizedNumber, readCellScalar } from "./parse-va
 import type { AssetCondition, AssetRowProvenance, AssetSheetMapping, CanonicalAssetInput, CanonicalizedAssetRow } from "./types";
 
 const conditions: readonly AssetCondition[] = ["P0", "P1", "P2", "P3", "P4"];
+const rowLabelFields: readonly (keyof CanonicalAssetInput)[] = [
+  "unitInduk", "upt", "namaGi", "bayPenghantar", "tid", "noAset", "namaPeralatan",
+];
 
 function isBlank(value: unknown): boolean {
   return value === null || value === undefined || typeof value === "string" && !value.trim();
@@ -51,15 +54,13 @@ export function canonicalizeAssetRow(row: readonly unknown[], mapping: AssetShee
   }
   const ageSource = asset.tanggalOperasi ? "OPERATION_DATE" : asset.usiaAsetTahun !== null && asset.usiaAsetTahun >= 0 ? "PROVIDED_AGE" : "MISSING";
   if (asset.tanggalOperasi) asset.usiaAsetTahun = null;
-  const firstLabel = mapping.columns
-    .filter((column) => column.field && column.field !== "keterangan")
-    .sort((a, b) => a.columnIndex - b.columnIndex)
-    .map((column) => normalizeHeader(readCellScalar(row[column.columnIndex - 1]).value))
-    .find(Boolean) ?? "";
+  // Semantic labels are stable when source columns move; numeric, unit,
+  // specification and note fields cannot mark a row as an example/subtotal.
+  const labels = rowLabelFields.map((field) => normalizeHeader(asset[field]));
   let rejectionReason: CanonicalizedAssetRow["rejectionReason"] = null;
   if (row.every(isBlank)) rejectionReason = "BLANK";
-  else if (/^(?:CONTOH|EXAMPLE|SAMPLE)(?: |$)/.test(firstLabel)) rejectionReason = "EXAMPLE";
-  else if (/^(?:SUBTOTAL|SUB TOTAL|GRAND TOTAL|TOTAL)(?: |$)/.test(firstLabel)) rejectionReason = "SUBTOTAL";
+  else if (labels.some((label) => /^(?:CONTOH|EXAMPLE|SAMPLE)(?: |$)/.test(label))) rejectionReason = "EXAMPLE";
+  else if (labels.some((label) => /^(?:SUBTOTAL|SUB TOTAL|GRAND TOTAL|TOTAL)(?: |$)/.test(label))) rejectionReason = "SUBTOTAL";
   else if (mapping.columns.filter((column) => column.field && normalizeHeader(row[column.columnIndex - 1]) === column.normalizedHeader).length >= 4) rejectionReason = "REPEATED_HEADER";
   else if (!(asset.tid || asset.noAset || asset.namaGi || asset.bayPenghantar || asset.unitInduk || asset.upt) || !(asset.namaPeralatan || asset.spesifikasiMara) || !sources.jumlah || isBlank(sources.jumlah.rawValue) || !asset.satuan) rejectionReason = "INCOMPLETE_CANDIDATE";
   return { asset, provenance, sources, issues, ageSource, candidate: rejectionReason === null, rejectionReason };

@@ -17,6 +17,11 @@ export function readCellScalar(raw: unknown): ScalarCell {
     if ("formula" in cell || "sharedFormula" in cell) {
       const formula = String(cell.formula ?? cell.sharedFormula);
       const result = cell.result;
+      if (result instanceof Date) {
+        return Number.isFinite(result.getTime())
+          ? { value: result, formula, issue: null }
+          : { value: null, formula, issue: "INVALID_FORMULA_RESULT" };
+      }
       if (result === null || result === undefined || typeof result === "object" || typeof result === "boolean" || typeof result === "number" && !Number.isFinite(result) || typeof result === "string" && (!result.trim() || result.startsWith("#"))) {
         return { value: null, formula, issue: "INVALID_FORMULA_RESULT" };
       }
@@ -54,7 +59,7 @@ export function parseLocalizedNumber(raw: unknown): ParsedNumber {
 /** Strict calendar parsing, independent of the current date or machine timezone. */
 export function parseAssetDate(value: unknown): string | null {
   if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString().slice(0, 10) : null;
-  if (typeof value === "number" && Number.isFinite(value) && value >= 1 && value !== 60 && value <= 2958465) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 1 && Math.floor(value) !== 60 && value <= 2958465) {
     const date = new Date(Date.UTC(1899, 11, 31) + (Math.floor(value) - (value > 60 ? 1 : 0)) * 86400000);
     return date.toISOString().slice(0, 10);
   }

@@ -34,6 +34,19 @@ describe("canonical asset rows", () => {
     expect(row.ageSource).toBe("OPERATION_DATE");
     expect(row.sources.usiaAsetTahun?.rawValue).toBe(10);
   });
+  it("accepts valid cached formula dates while retaining field-specific validation", () => {
+    const values = [...assetRow];
+    values[10] = { formula: "DATE(2010,2,3)", result: new Date("2010-02-03T00:00:00Z") };
+    const row = canonicalizeAssetRow(values, mapping, provenance);
+    expect(row.asset.tanggalOperasi).toBe("2010-02-03");
+    expect(row.asset.usiaAsetTahun).toBeNull();
+    expect(row.sources.tanggalOperasi).toMatchObject({ formula: "DATE(2010,2,3)", address: "K7" });
+    expect(row.issues).not.toEqual(expect.arrayContaining([expect.objectContaining({ field: "tanggalOperasi" })]));
+    values[10] = { formula: "DATE(0,0,0)", result: new Date(NaN) };
+    expect(canonicalizeAssetRow(values, mapping, provenance).issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "INVALID_FORMULA_RESULT", field: "tanggalOperasi" })]));
+    values[12] = { formula: "DATE(2010,2,3)", result: new Date("2010-02-03T00:00:00Z") };
+    expect(canonicalizeAssetRow(values, mapping, provenance).issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "INVALID_FORMULA_RESULT", field: "nilaiBukuSap" })]));
+  });
   it.each([[7, 0, "NON_POSITIVE_QUANTITY"], [7, -1, "NON_POSITIVE_QUANTITY"], [9, "P5", "INVALID_CONDITION"], [11, -2, "NEGATIVE_NUMBER"]])("reports field errors at source column %s", (index, value, code) => {
     const values = [...assetRow];
     values[index as number] = value;
@@ -84,6 +97,27 @@ describe("canonical asset rows", () => {
     expect(canonicalizeAssetRow([...assetRow, "Total pekerjaan selesai"], withNotes, provenance).candidate).toBe(true);
   });
 
+  it.each([["CONTOH", "EXAMPLE"], ["SUBTOTAL", "SUBTOTAL"], ["TOTAL", "SUBTOTAL"]])("rejects explicit %s labels when quantity precedes identity columns", (label, reason) => {
+    const source = gridFixture();
+    const order = [7, 8, 9, 12, 0, 1, 2, 3, 4, 5, 6, 10, 11];
+    source.sheets[0].rows[0] = order.map((index) => source.sheets[0].rows[0][index]);
+    const reorderedMapping = detectWorkbookLayout(source).selected!;
+    const values = [...assetRow]; values[0] = label;
+    const row = canonicalizeAssetRow(order.map((index) => values[index]), reorderedMapping, provenance);
+    expect(row.candidate).toBe(false);
+    expect(row.rejectionReason).toBe(reason);
+  });
+
+  it("recognizes explicit markers in location labels after a populated unit label", () => {
+    const values = [...assetRow]; values[2] = "SUBTOTAL";
+    expect(canonicalizeAssetRow(values, mapping, provenance).rejectionReason).toBe("SUBTOTAL");
+  });
+
+  it("does not classify unit or specification values as example/subtotal row markers", () => {
+    const values = [...assetRow]; values[6] = "Total installed 150/20 kV"; values[8] = "EXAMPLE";
+    expect(canonicalizeAssetRow(values, mapping, provenance).candidate).toBe(true);
+  });
+
   it("reports blank required fields without replacing them with guessed data", () => {
     const values = [...assetRow]; values[0] = null; values[9] = null;
     const row = canonicalizeAssetRow(values, mapping, provenance);
@@ -94,7 +128,7 @@ describe("canonical asset rows", () => {
     ]));
   });
 
-  it.each([["03/02/2010", "2010-02-03"], [40212, "2010-02-03"], ["31/02/2010", null], ["2010-02-31", null], [60, null]])("validates date %s and falls back to supplied age only when invalid", (raw, date) => {
+  it.each([["03/02/2010", "2010-02-03"], [40212, "2010-02-03"], ["31/02/2010", null], ["2010-02-31", null], [60, null], [60.01, null], [60.5, null], [60.9999, null]])("validates date %s and falls back to supplied age only when invalid", (raw, date) => {
     const values = [...assetRow]; values[10] = raw;
     const row = canonicalizeAssetRow(values, mapping, provenance);
     expect(row.asset.tanggalOperasi).toBe(date);

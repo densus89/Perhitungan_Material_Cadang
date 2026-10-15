@@ -1,9 +1,37 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
 import { readAssetWorkbook } from "../../../src/lib/spreadsheet/read-asset-workbook";
 import { assetRow, gridFixture, headers, workbookBytes } from "../../fixtures/asset-workbooks";
 
 describe("shared asset workbook reader", () => {
+  it("reads ExcelJS date-formatted formula caches without rejecting valid dates", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("DATA_ASET");
+    sheet.addRows([headers, assetRow]);
+    sheet.getCell("K2").value = { formula: "DATE(2010,2,3)", result: new Date("2010-02-03T00:00:00Z") };
+    sheet.getCell("K2").numFmt = "yyyy-mm-dd";
+    const bytes = new Uint8Array(await workbook.xlsx.writeBuffer());
+    const result = await readAssetWorkbook(bytes, { ruleVersion: "v1", collectRows: true });
+    expect(result.rows?.[0].asset.tanggalOperasi).toBe("2010-02-03");
+    expect(result.rows?.[0].sources.tanggalOperasi).toMatchObject({ formula: "DATE(2010,2,3)", address: "K2" });
+    expect(result.summary.errorRows).toBe(0);
+  });
+
+  it.each([
+    ["rich text", { richText: [{ text: "U" }, { text: "PT" }] }],
+    ["hyperlink", { text: "UPT", hyperlink: "https://invalid.example/never-fetch" }],
+    ["cached formula", { formula: '"UPT"', result: "UPT" }],
+  ])("confirms unchanged %s headers using the same safe display text as detection", async (_, header) => {
+    const labels: unknown[] = [...headers]; labels[1] = header;
+    const bytes = await workbookBytes([{ name: "DATA_ASET", rows: [labels, assetRow] }]);
+    const proposal = await readAssetWorkbook(bytes, { ruleVersion: "v1" });
+    expect(proposal.layout.selected?.columns[1].normalizedHeader).toBe("UPT");
+    const confirmed = await readAssetWorkbook(bytes, { ruleVersion: "v1", confirmedMapping: proposal.layout.selected! });
+    expect(confirmed.summary.candidateRows).toBe(1);
+    expect(confirmed.layoutHash).toBe(proposal.layoutHash);
+  });
+
   it("scans all sheets, excludes examples, spacers, totals and helper columns", async () => {
     const rows = [[...headers, "NILAI_ABC_FINAL"], ["CONTOH", ...assetRow.slice(1), 999], [], [...assetRow, 999], ["SUBTOTAL", ...assetRow.slice(1)], [...assetRow, 999]];
     const source = gridFixture("3400", 50);

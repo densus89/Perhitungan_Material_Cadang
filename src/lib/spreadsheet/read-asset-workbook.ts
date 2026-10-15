@@ -3,6 +3,7 @@ import { canonicalizeAssetRow } from "../../domain/asset-import/canonicalize-row
 import { detectWorkbookLayout } from "../../domain/asset-import/detect-layout";
 import { CANONICAL_ASSET_FIELDS } from "../../domain/asset-import/fields";
 import { normalizeHeader } from "../../domain/asset-import/normalize-header";
+import { readCellScalar } from "../../domain/asset-import/parse-value";
 import type { AssetSheetMapping, CanonicalizedAssetRow, WorkbookLayoutProposal } from "../../domain/asset-import/types";
 
 export interface ReadAssetWorkbookOptions {
@@ -40,7 +41,7 @@ function validateMapping(mapping: AssetSheetMapping, workbook: ExcelJS.Workbook)
   const indexes = new Set<number>();
   const fields = new Set<string>();
   for (const column of mapping.columns) {
-    if (!Number.isInteger(column.columnIndex) || column.columnIndex < 1 || column.columnIndex > sheet.columnCount || indexes.has(column.columnIndex) || normalizeHeader(sheet.getCell(mapping.headerRow, column.columnIndex).value) !== column.normalizedHeader) throw new Error("Invalid confirmed mapping column");
+    if (!Number.isInteger(column.columnIndex) || column.columnIndex < 1 || column.columnIndex > sheet.columnCount || indexes.has(column.columnIndex) || normalizeHeader(readCellScalar(sheet.getCell(mapping.headerRow, column.columnIndex).value).value) !== column.normalizedHeader) throw new Error("Invalid confirmed mapping column");
     indexes.add(column.columnIndex);
     if (!column.field) continue;
     if (!CANONICAL_ASSET_FIELDS.some((field) => field.key === column.field) || fields.has(column.field)) throw new Error("Invalid confirmed mapping field");
