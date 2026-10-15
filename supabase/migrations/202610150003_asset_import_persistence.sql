@@ -305,20 +305,27 @@ begin
     'import_column_mappings','asset_import_runs','asset_snapshot_rows','asset_valuations',
     'gi_location_references','version_comparisons','asset_version_changes'] loop
     execute format('alter table public.%I enable row level security',table_name);
-    execute format('revoke all on table public.%I from public, anon, authenticated',table_name);
+    execute format('revoke all on table public.%I from public, anon, authenticated, service_role',table_name);
     execute format('grant select on table public.%I to authenticated',table_name);
-    execute format('grant all on table public.%I to service_role',table_name);
+    execute format('grant select, insert, update, delete on table public.%I to service_role',table_name);
     execute format('create policy asset_unit_read on public.%I for select to authenticated using (private.can_access_unit(unit_induk_id))',table_name);
   end loop;
   foreach table_name in array array['useful_life_rules','asset_class_mappings'] loop
     execute format('alter table public.%I enable row level security',table_name);
-    execute format('revoke all on table public.%I from public, anon, authenticated',table_name);
+    execute format('revoke all on table public.%I from public, anon, authenticated, service_role',table_name);
     execute format('grant select on table public.%I to authenticated',table_name);
-    execute format('grant all on table public.%I to service_role',table_name);
+    execute format('grant select, insert, update, delete on table public.%I to service_role',table_name);
     execute format('create policy asset_reference_read on public.%I for select to authenticated using ((select private.current_app_role()) is not null)',table_name);
   end loop;
 end;
 $$;
+
+-- Only the owner-executed, actor-checked finalization RPC can set this pointer.
+-- Service writes cannot switch even an editable draft to an unaudited old run.
+revoke insert,update on public.import_sessions from service_role;
+grant insert(id,unit_induk_id,dataset_id,dataset_version_id,source_file_id,created_by,created_at,updated_at)
+  on public.import_sessions to service_role;
+grant update(updated_at) on public.import_sessions to service_role;
 
 update storage.buckets set public=false,file_size_limit=52428800,
   allowed_mime_types=array['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
@@ -347,11 +354,30 @@ create trigger approval_events_immutable before update or delete on public.appro
   for each row execute function private.reject_event_mutation();
 create trigger audit_events_immutable before update or delete on public.audit_events
   for each row execute function private.reject_event_mutation();
+revoke all on public.approval_events,public.audit_events from service_role;
+grant select,insert on public.approval_events,public.audit_events to service_role;
 revoke truncate on public.approval_events,public.audit_events from public,anon,authenticated,service_role;
 create trigger approval_events_no_truncate before truncate on public.approval_events
   for each statement execute function private.reject_event_mutation();
 create trigger audit_events_no_truncate before truncate on public.audit_events
   for each statement execute function private.reject_event_mutation();
+
+create function private.reject_asset_truncate() returns trigger
+language plpgsql set search_path='' as $$
+begin raise exception 'Asset evidence cannot be truncated' using errcode='42501'; end;
+$$;
+-- Statement guards cover owner-level mistakes and TRUNCATE ... CASCADE, which
+-- never execute the row guards. Exact DML grants above already exclude TRUNCATE.
+do $$
+declare table_name text;
+begin
+  foreach table_name in array array['source_files','import_sessions','import_sheets','mapping_profiles',
+    'import_column_mappings','asset_import_runs','asset_snapshot_rows','asset_valuations',
+    'useful_life_rules','asset_class_mappings','gi_location_references','version_comparisons','asset_version_changes'] loop
+    execute format('create trigger asset_evidence_no_truncate before truncate on public.%I for each statement execute function private.reject_asset_truncate()',table_name);
+  end loop;
+end;
+$$;
 
 -- Independent of JWT claims: a service call never turns a supplied UUID into
 -- authority. Row locks prevent assignment replacement during this transaction.
@@ -371,6 +397,24 @@ begin
     if found then return; end if;
   end if;
   raise exception 'Actor has no required role or unit scope' using errcode='42501';
+end;
+$$;
+
+-- Lock protocol shared by PROCESSING creation and all version workflow RPCs:
+-- dataset -> version -> import session. Workflow run locks follow these parents;
+-- PROCESSING batch writers only lock their run (readiness rejects that status).
+-- If creation wins, submit sees PROCESSING; if submit wins, creation rereads
+-- PENDING_RST after the parent locks and rejects. No stale readiness window.
+create function private.lock_asset_version_for_workflow(p_version_id uuid)
+returns void language plpgsql security definer set search_path='' as $$
+declare target_dataset_id uuid;
+begin
+  select dataset_id into target_dataset_id from public.dataset_versions where id=p_version_id;
+  if not found then raise exception 'Version not found' using errcode='22023'; end if;
+  perform 1 from public.datasets where id=target_dataset_id for update;
+  perform 1 from public.dataset_versions v where v.id=p_version_id for update;
+  if not found then raise exception 'Version not found' using errcode='22023'; end if;
+  perform 1 from public.import_sessions where dataset_version_id=p_version_id for update;
 end;
 $$;
 
@@ -476,6 +520,9 @@ begin
   if tg_op='INSERT' and new.status<>'PROCESSING' then
     raise exception 'New import run must be processing' using errcode='22023';
   end if;
+  if tg_op='INSERT' then
+    perform private.lock_asset_version_for_workflow(new.dataset_version_id);
+  end if;
   if tg_op='UPDATE' and (new.id,new.import_session_id,new.unit_induk_id,new.dataset_version_id)
     is distinct from (old.id,old.import_session_id,old.unit_induk_id,old.dataset_version_id) then
     raise exception 'Import run ownership is immutable' using errcode='22023';
@@ -515,6 +562,7 @@ create trigger guard_asset_run before insert or update or delete on public.asset
 
 create function private.guard_asset_session() returns trigger
 language plpgsql security definer set search_path='' as $$
+declare version_status public.dataset_status;
 begin
   if tg_op='UPDATE' and (new.id,new.unit_induk_id,new.dataset_id,new.dataset_version_id,new.source_file_id)
     is distinct from (old.id,old.unit_induk_id,old.dataset_id,old.dataset_version_id,old.source_file_id) then
@@ -522,6 +570,14 @@ begin
   end if;
   if tg_op='UPDATE' and old.current_run_id is not null and new.current_run_id is null then
     raise exception 'A finalized session must retain a current run' using errcode='22023';
+  end if;
+  if tg_op='INSERT' or new.current_run_id is distinct from old.current_run_id then
+    -- Finalization already owns dataset/version/session locks in that order;
+    -- direct service pointer updates are forbidden by the column ACL above.
+    select status into version_status from public.dataset_versions where id=new.dataset_version_id;
+    if new.current_run_id is not null and version_status not in ('DRAFT','NEEDS_FIX','READY_TO_SUBMIT') then
+      raise exception 'Only editable versions can switch their current run' using errcode='22023';
+    end if;
   end if;
   if new.current_run_id is not null and not exists(select 1 from public.asset_import_runs r
     where r.id=new.current_run_id and r.import_session_id=new.id and r.status='COMPLETE') then
@@ -552,13 +608,11 @@ create trigger guard_asset_comparison_change before insert or update on public.a
 
 create function public.finalize_asset_import_run(p_actor_id uuid,p_run_id uuid)
 returns uuid language plpgsql security definer set search_path='' as $$
-declare run public.asset_import_runs; session public.import_sessions; target_dataset uuid;
+declare run public.asset_import_runs; session public.import_sessions;
 begin
-  select s.dataset_id into target_dataset from public.asset_import_runs r
-    join public.import_sessions s on s.id=r.import_session_id where r.id=p_run_id;
-  if not found then raise exception 'Import run not found' using errcode='22023'; end if;
-  perform 1 from public.datasets where id=target_dataset for update;
   select * into run from public.asset_import_runs where id=p_run_id;
+  if not found then raise exception 'Import run not found' using errcode='22023'; end if;
+  perform private.lock_asset_version_for_workflow(run.dataset_version_id);
   perform private.assert_asset_actor(p_actor_id,run.unit_induk_id,false);
   perform 1 from public.dataset_versions where id=run.dataset_version_id
     and status in ('DRAFT','NEEDS_FIX','READY_TO_SUBMIT') for update;
@@ -608,7 +662,7 @@ declare dataset public.datasets; version public.dataset_versions; run_id uuid;
 begin
   select d.* into dataset from public.datasets d join public.dataset_versions v on v.dataset_id=d.id where v.id=p_version_id;
   if not found then raise exception 'Version not found' using errcode='22023'; end if;
-  perform 1 from public.datasets where id=dataset.id for update;
+  perform private.lock_asset_version_for_workflow(p_version_id);
   perform private.assert_asset_actor(p_actor_id,dataset.unit_induk_id,false);
   select * into version from public.dataset_versions where id=p_version_id for update;
   if dataset.type<>'ASSET' or version.status not in ('DRAFT','NEEDS_FIX','READY_TO_SUBMIT') then
@@ -629,7 +683,7 @@ declare dataset public.datasets; version public.dataset_versions;
 begin
   select d.* into dataset from public.datasets d join public.dataset_versions v on v.dataset_id=d.id where v.id=p_version_id;
   if not found then raise exception 'Version not found' using errcode='22023'; end if;
-  perform 1 from public.datasets where id=dataset.id for update;
+  perform private.lock_asset_version_for_workflow(p_version_id);
   perform private.assert_asset_actor(p_actor_id,dataset.unit_induk_id,true);
   select * into version from public.dataset_versions where id=p_version_id for update;
   if dataset.type<>'ASSET' or version.status<>'PENDING_RST' or nullif(btrim(p_notes),'') is null then
@@ -649,7 +703,8 @@ declare dataset public.datasets; version public.dataset_versions; run_id uuid;
 begin
   select d.* into dataset from public.datasets d join public.dataset_versions v on v.dataset_id=d.id where v.id=p_version_id;
   if not found then raise exception 'Version not found' using errcode='22023'; end if;
-  select * into dataset from public.datasets where id=dataset.id for update;
+  perform private.lock_asset_version_for_workflow(p_version_id);
+  select * into dataset from public.datasets where id=dataset.id;
   perform private.assert_asset_actor(p_actor_id,dataset.unit_induk_id,true);
   select * into version from public.dataset_versions where id=p_version_id for update;
   if dataset.type<>'ASSET' or version.status<>'PENDING_RST' or nullif(btrim(p_notes),'') is null then
@@ -673,6 +728,7 @@ end;
 $$;
 
 revoke all on function private.check_source_object_path(),private.reject_event_mutation(),
+  private.reject_asset_truncate(),private.lock_asset_version_for_workflow(uuid),
   private.assert_asset_actor(uuid,uuid,boolean),private.asset_run_hashes(uuid),private.guard_asset_batch(),
   private.guard_gi_location_reference(),
   private.guard_asset_run(),private.guard_asset_session(),private.guard_asset_comparison_change(),

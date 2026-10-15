@@ -138,7 +138,7 @@ select throws_ok($sql$ update public.audit_events set action = 'rewritten' $sql$
 select throws_ok($sql$ delete from public.audit_events $sql$, '42501', null, 'Audit events cannot be deleted by clients');
 select throws_ok($sql$ update public.approval_events set notes = 'rewritten' $sql$, '42501', null, 'Approval decisions are immutable');
 select throws_ok($sql$ delete from public.approval_events $sql$, '42501', null, 'Approval decisions cannot be deleted by clients');
-select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'admin-forbidden.csv') $sql$, '42501', null, 'Admin cannot upload source files');
+select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'unit/31000000-0000-4000-8000-000000000001/dataset/32000000-0000-4000-8000-000000000001/version/33000000-0000-4000-8000-000000000001/34000000-0000-4000-8000-000000000001.xlsx') $sql$, '42501', null, 'Admin cannot upload a valid scoped XLSX directly');
 reset role;
 
 select set_config('request.jwt.claim.sub', '39000000-0000-4000-8000-000000000001', true);
@@ -159,7 +159,7 @@ select is(pg_temp.visible('select count(*) from public.audit_events'), 0::bigint
 select ok(pg_temp.changed($sql$ update public.profiles set status = 'DISABLED' $sql$) <= 0, 'Reviewer cannot manage users');
 select ok(pg_temp.changed($sql$ delete from public.datasets $sql$) <= 0, 'Reviewer cannot delete datasets');
 select ok(pg_temp.changed($sql$ delete from public.dataset_versions $sql$) <= 0, 'Reviewer cannot delete versions');
-select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'reviewer-forbidden.csv') $sql$, '42501', null, 'Reviewer cannot upload source files');
+select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'unit/31000000-0000-4000-8000-000000000001/dataset/32000000-0000-4000-8000-000000000001/version/33000000-0000-4000-8000-000000000001/34000000-0000-4000-8000-000000000002.xlsx') $sql$, '42501', null, 'Reviewer cannot upload a valid scoped XLSX directly');
 reset role;
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000003', true);
@@ -197,7 +197,7 @@ select ok(pg_temp.changed($sql$ update public.profiles set status = 'ACTIVE' whe
 select ok(pg_temp.changed($sql$ update public.user_role_assignments set role = 'RST_ADMIN' where user_id = '30000000-0000-4000-8000-000000000003' $sql$) <= 0, 'Operator cannot elevate own role');
 select throws_ok($sql$ insert into public.user_unit_assignments (user_id, unit_induk_id) values ('30000000-0000-4000-8000-000000000003', '31000000-0000-4000-8000-000000000002') $sql$, '42501', null, 'Operator cannot self-assign another unit');
 select throws_ok($sql$ insert into public.audit_events (actor_id, action, target_type) values ('30000000-0000-4000-8000-000000000003', 'forged', 'dataset') $sql$, '42501', null, 'Operator cannot append arbitrary audits');
-select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'operator-forbidden.csv') $sql$, '42501', null, 'Operator cannot upload before signed-upload workflow');
+select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'unit/31000000-0000-4000-8000-000000000001/dataset/32000000-0000-4000-8000-000000000001/version/33000000-0000-4000-8000-000000000001/34000000-0000-4000-8000-000000000003.xlsx') $sql$, '42501', null, 'Operator needs a signed token even for a valid scoped XLSX');
 reset role;
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000004', true);
@@ -208,7 +208,7 @@ select is(pg_temp.visible('select count(*) from public.datasets'), 0::bigint, 'V
 select is(pg_temp.visible('select count(*) from public.dataset_versions'), 0::bigint, 'Viewer cannot read detailed versions');
 select is(pg_temp.visible('select count(*) from public.approval_events'), 0::bigint, 'Viewer cannot read detailed approval events');
 select throws_ok($sql$ insert into public.datasets (unit_induk_id, type) values ('31000000-0000-4000-8000-000000000002', 'PRICE') $sql$, '42501', null, 'Viewer cannot create metadata');
-select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'viewer-forbidden.csv') $sql$, '42501', null, 'Viewer cannot upload source files');
+select throws_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'unit/31000000-0000-4000-8000-000000000001/dataset/32000000-0000-4000-8000-000000000001/version/33000000-0000-4000-8000-000000000001/34000000-0000-4000-8000-000000000004.xlsx') $sql$, '42501', null, 'Viewer cannot upload a valid scoped XLSX directly');
 reset role;
 
 -- Every inactive/roleless account is checked against every application table.
@@ -250,7 +250,7 @@ reset role;
 
 -- Storage SELECT is tested against an actual object, so missing read policies
 -- cannot pass simply because the bucket happens to be empty.
-select lives_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'synthetic-private.csv') $sql$, 'Privileged fixture creates a real private object');
+select lives_ok($sql$ insert into storage.objects (bucket_id, name) values ('source-files', 'unit/31000000-0000-4000-8000-000000000001/dataset/32000000-0000-4000-8000-000000000001/version/33000000-0000-4000-8000-000000000001/34000000-0000-4000-8000-000000000005.xlsx') $sql$, 'Privileged fixture creates a valid scoped private XLSX object');
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000001', true);
 set local role authenticated;
 select is(pg_temp.visible($sql$ select count(*) from storage.objects where bucket_id = 'source-files' $sql$), 0::bigint, 'Authenticated clients cannot read source objects');

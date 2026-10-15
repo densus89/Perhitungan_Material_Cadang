@@ -44,6 +44,11 @@ insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_ve
 
 select ok(c.relrowsecurity,'RLS enabled: '||c.relname) from pg_class c join pg_namespace n on n.oid=c.relnamespace
  where n.nspname='public' and c.relname in ('source_files','import_sessions','import_sheets','mapping_profiles','import_column_mappings','asset_import_runs','asset_snapshot_rows','useful_life_rules','asset_class_mappings','asset_valuations','gi_location_references','version_comparisons','asset_version_changes');
+select is((select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relrowsecurity
+ and c.relname in ('source_files','import_sessions','import_sheets','mapping_profiles','import_column_mappings','asset_import_runs','asset_snapshot_rows','useful_life_rules','asset_class_mappings','asset_valuations','gi_location_references','version_comparisons','asset_version_changes')),13::bigint,'RLS checks cover all thirteen expected tables');
+select ok(not has_table_privilege('service_role','public.'||name,'TRUNCATE'),'Service has no TRUNCATE grant: '||name) from (values
+ ('source_files'),('import_sessions'),('import_sheets'),('mapping_profiles'),('import_column_mappings'),('asset_import_runs'),('asset_snapshot_rows'),('useful_life_rules'),('asset_class_mappings'),('asset_valuations'),('gi_location_references'),('version_comparisons'),('asset_version_changes')) t(name);
+select ok(not has_column_privilege('service_role','public.import_sessions','current_run_id','UPDATE'),'Service cannot bypass audited finalization by updating current_run_id');
 select ok(not has_table_privilege('authenticated','public.'||name,'INSERT,UPDATE,DELETE'),'No direct writes: '||name) from (values
  ('source_files'),('import_sessions'),('import_sheets'),('mapping_profiles'),('import_column_mappings'),('asset_import_runs'),('asset_snapshot_rows'),('useful_life_rules'),('asset_class_mappings'),('asset_valuations'),('gi_location_references'),('version_comparisons'),('asset_version_changes'),('approval_events'),('audit_events')) t(name);
 select ok(not has_function_privilege('authenticated',signature,'EXECUTE') and has_function_privilege('service_role',signature,'EXECUTE'),'Service-only RPC: '||signature) from (values
@@ -54,7 +59,7 @@ set local role authenticated;
 select is((select count(*) from public.import_sessions where id::text like '55000000-%'),1::bigint,'Operator reads only its draft summary');
 select is((select count(*) from public.asset_snapshot_rows where id::text like '58000000-%'),1::bigint,'Operator reads only its rows');
 select is((select id from public.asset_snapshot_rows where id::text like '58000000-%'),'58000000-0000-4000-8000-000000000001'::uuid,'Operator A sees A, not B');
-select throws_ok($$insert into storage.objects(bucket_id,name) values('source-files','forged.xlsx')$$,'42501',null,'Direct storage upload denied');
+select throws_ok($$insert into storage.objects(bucket_id,name) values('source-files','unit/51000000-0000-4000-8000-000000000001/dataset/52000000-0000-4000-8000-000000000001/version/53000000-0000-4000-8000-000000000001/54000000-0000-4000-8000-000000000009.xlsx')$$,'42501',null,'Valid scoped XLSX path is denied by storage authorization');
 reset role;
 select set_config('request.jwt.claim.sub','50000000-0000-4000-8000-000000000002',true);
 set local role authenticated;
@@ -84,7 +89,8 @@ reset role;
 select throws_ok($$update public.asset_import_runs set unit_induk_id='51000000-0000-4000-8000-000000000002' where id='57000000-0000-4000-8000-000000000001'$$,'22023',null,'Run cannot move to another unit');
 select throws_ok($$update public.import_sessions set current_run_id='57000000-0000-4000-8000-000000000001' where id='55000000-0000-4000-8000-000000000001'$$,'22023',null,'Processing run cannot become current directly');
 select throws_ok($$update public.import_sessions set source_file_id='54000000-0000-4000-8000-000000000002' where id='55000000-0000-4000-8000-000000000001'$$,'22023',null,'Session source ownership cannot change');
-select throws_ok($$insert into storage.objects(bucket_id,name) values('source-files','unit/51000000-0000-4000-8000-000000000001/file.csv')$$,'22023',null,'Non-XLSX extension rejected even at storage database boundary');
+select throws_ok($$insert into storage.objects(bucket_id,name) values('source-files','unit/51000000-0000-4000-8000-000000000001/dataset/52000000-0000-4000-8000-000000000001/version/53000000-0000-4000-8000-000000000001/54000000-0000-4000-8000-000000000009.csv')$$,'22023',null,'Non-XLSX extension rejected even at storage database boundary');
+select throws_ok($$insert into storage.objects(bucket_id,name) values('source-files','unit/51000000-0000-4000-8000-000000000001/dataset/52000000-0000-4000-8000-000000000001/version/53000000-0000-4000-8000-000000000001/../54000000-0000-4000-8000-000000000009.xlsx')$$,'22023',null,'Storage path traversal is a validation error');
 insert into public.gi_location_references(unit_induk_id,unit_induk_key,upt,nama_gi,latitude,longitude,source_hash,source_version,updated_by)
  values('51000000-0000-4000-8000-000000000001','ASSET_RLS_A','  UPT   Alpha ',' GI  Alpha ',0,100,repeat('a',64),'synthetic','50000000-0000-4000-8000-000000000003');
 select throws_ok($$update public.gi_location_references set unit_induk_key='OTHER_UNIT' where unit_induk_id='51000000-0000-4000-8000-000000000001'$$,'22023',null,'Coordinate unit label must agree with the relational unit master');
