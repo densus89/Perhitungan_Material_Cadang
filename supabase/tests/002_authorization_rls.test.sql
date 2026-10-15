@@ -97,7 +97,10 @@ select is((select count(*)::integer from pg_proc p join pg_namespace n on n.oid 
   where n.nspname = 'private' and a.grantee = 0 and a.privilege_type = 'EXECUTE'),
   0, 'PUBLIC cannot execute private helpers');
 select is((select count(*)::integer from pg_class c join pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity), 8, 'Every phase-1 public table has RLS');
+  where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+    -- Later asset tables have their own schema/RLS/workflow coverage in 004-006.
+    and c.relname in ('unit_induk','profiles','user_role_assignments','user_unit_assignments',
+      'datasets','dataset_versions','approval_events','audit_events')), 8, 'Every phase-1 public table has RLS');
 select ok(not has_table_privilege('anon', 'public.' || name, 'SELECT'), 'Anonymous SELECT grant revoked: ' || name)
   from (values ('unit_induk'), ('profiles'), ('user_role_assignments'), ('user_unit_assignments'),
     ('datasets'), ('dataset_versions'), ('approval_events'), ('audit_events')) tables(name);
