@@ -18,6 +18,36 @@ describe("technical and location comparable gates", () => {
     expect(rankComparableCandidates(target, [candidate]).status).toBe("UNRESOLVED");
     expect(rankComparableCandidates({ ...target, approvedRfqGroup: group }, [{ ...candidate, spesifikasiMara: "150/22/10 kV 60 MVA" }]).status).toBe("UNRESOLVED");
   });
+  it.each([["0", "UNRESOLVED"], ["2026-02-31", "UNRESOLVED"], ["2026-01-01", "RESOLVED"], ["2026-12-01", "UNRESOLVED"]] as const)("validates RFQ approval date %s on both target and donor", (approvedAt, status) => {
+    const group = { id: "rfq-a", approvedBy: "RST", approvedAt: "2026-01-01" };
+    const candidate = donor("a", { spesifikasiMara: "TRAFO 150/20 kV 60 MVA", approvedRfqGroup: group });
+    expect(rankComparableCandidates({ ...target, approvedRfqGroup: { ...group, approvedAt } }, [candidate], { asOf: "2026-10-15" }).status).toBe(status);
+    expect(rankComparableCandidates({ ...target, approvedRfqGroup: group }, [{ ...candidate, approvedRfqGroup: { ...group, approvedAt } }], { asOf: "2026-10-15" }).status).toBe(status);
+  });
+  it("counts identical price donor IDs once and retains the one-donor warning", () => {
+    const single = donor("a", { hargaPengadaanSaatIni: 100 });
+    const result = rankComparableCandidates(target, [single, { ...single }]);
+    expect(result).toMatchObject({ candidateCount: 1, median: 100, min: 100, max: 100, selectedDonorIds: ["a"] });
+    expect(result.warnings).toContain("SINGLE_DONOR");
+    expect(rankComparableCandidates(target, [single, { ...single }, donor("b", { hargaPengadaanSaatIni: 300 })]).median).toBe(200);
+  });
+  it("quarantines conflicting price donor IDs before compatibility/tier selection regardless of input order", () => {
+    const records = [donor("a", { hargaPengadaanSaatIni: 100 }), donor("a", { hargaPengadaanSaatIni: 900 }), donor("b", { hargaPengadaanSaatIni: 300 })];
+    const result = rankComparableCandidates(target, records);
+    expect(result).toMatchObject({ candidateCount: 1, median: 300, selectedDonorIds: ["b"], rejectedDonors: [{ id: "a", code: "DONOR_ID_CONFLICT" }] });
+    expect(result.warnings).toEqual(expect.arrayContaining(["DONOR_ID_CONFLICT", "SINGLE_DONOR"]));
+    expect(rankComparableCandidates(target, [...records].reverse())).toEqual(result);
+    const incompatibleConflict = [records[0], { ...records[0], spesifikasiMara: "150/22/10 kV 60 MVA" }];
+    expect(rankComparableCandidates(target, incompatibleConflict)).toMatchObject({ status: "UNRESOLVED", candidateCount: 0, warnings: ["DONOR_ID_CONFLICT"], rejectedDonors: [{ id: "a", code: "DONOR_ID_CONFLICT" }] });
+    expect(rankComparableCandidates(target, [records[0], { ...records[0], namaGi: "OTHER GI" }])).toMatchObject({ status: "UNRESOLVED", warnings: ["DONOR_ID_CONFLICT"] });
+    expect(rankComparableCandidates(target, [records[0], { ...records[0], tanggalReferensiHarga: "2026-02-01" }])).toMatchObject({ status: "UNRESOLVED", warnings: ["DONOR_ID_CONFLICT"] });
+  });
+  it("accepts exactly 20 percent remaining life and rejects genuinely below threshold", () => {
+    const boundary = rankComparableCandidates(target, [donor("a", { hargaPengadaanSaatIni: null, nilaiBukuSap: 200, usiaAsetTahun: 32 })]);
+    expect(boundary).toMatchObject({ status: "RESOLVED", median: 1000 });
+    expect(boundary.donors[0].remainingLifeFactor).toBe(0.2);
+    expect(rankComparableCandidates(target, [donor("a", { hargaPengadaanSaatIni: null, nilaiBukuSap: 200, usiaAsetTahun: 32.000001 })]).status).toBe("UNRESOLVED");
+  });
   it.each([
     [{}, "SAME_GI"], [{ namaGi: "GI B" }, "SAME_UPT"], [{ namaGi: "GI B", upt: "UPT B" }, "SAME_UNIT"],
     [{ namaGi: "GI B", upt: "UPT B", unitInduk: "UNIT B" }, "NATIONAL"],
@@ -51,6 +81,23 @@ describe("technical and location comparable gates", () => {
   });
 });
 describe("compatible cohort median ages", () => {
+  it("counts identical age donors once before computing a cohort median", () => {
+    const single = donor("a", { usiaAsetTahun: 2 });
+    const result = imputeAssetAge({ ...target, usiaAsetTahun: null }, [single, { ...single }]);
+    expect(result).toMatchObject({ years: 2, donorIds: ["a"], cohort: [{ id: "a", years: 2 }] });
+    expect(result.warnings).toContain("SINGLE_DONOR");
+    expect(imputeAssetAge({ ...target, usiaAsetTahun: null }, [single, { ...single }, donor("b", { usiaAsetTahun: 10 })]).years).toBe(6);
+    expect(imputeAssetAge({ ...target, usiaAsetTahun: null }, [single, { ...single, kondisiAset: "P4" }])).toEqual(result);
+  });
+  it("quarantines conflicting age donor IDs deterministically with visible evidence", () => {
+    const records = [donor("a", { usiaAsetTahun: 2 }), donor("a", { usiaAsetTahun: 30 }), donor("b", { usiaAsetTahun: 10 })];
+    const result = imputeAssetAge({ ...target, usiaAsetTahun: null }, records);
+    expect(result).toMatchObject({ years: 10, donorIds: ["b"], rejectedDonors: [{ id: "a", code: "DONOR_ID_CONFLICT" }] });
+    expect(result.warnings).toEqual(expect.arrayContaining(["AGE_IMPUTED", "DONOR_ID_CONFLICT", "SINGLE_DONOR"]));
+    expect(imputeAssetAge({ ...target, usiaAsetTahun: null }, [...records].reverse())).toEqual(result);
+    expect(imputeAssetAge({ ...target, usiaAsetTahun: null }, records.slice(0, 2))).toMatchObject({ years: null, status: "UNRESOLVED", warnings: ["DONOR_ID_CONFLICT"], rejectedDonors: [{ id: "a", code: "DONOR_ID_CONFLICT" }] });
+    expect(imputeAssetAge({ ...target, usiaAsetTahun: null }, [records[0], { ...records[0], spesifikasiMara: "150/22/10 kV 60 MVA" }])).toMatchObject({ years: null, warnings: ["DONOR_ID_CONFLICT"] });
+  });
   it.each(["P0", "P1", "P2", "P3", "P4"] as const)("ignores target condition %s", (kondisiAset) => {
     expect(imputeAssetAge({ ...target, usiaAsetTahun: null, kondisiAset }, [donor("a", { usiaAsetTahun: 2 }), donor("b", { usiaAsetTahun: 10 }), donor("wrong", { usiaAsetTahun: 100, spesifikasiMara: "150/22/10 kV" })])).toMatchObject({ years: 6, status: "AGE_IMPUTED", tier: "SAME_GI", donorIds: ["a", "b"], manualApprovalRequired: true });
   });

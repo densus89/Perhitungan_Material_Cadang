@@ -53,7 +53,7 @@ export function resolveAssetValuation(input: ComparableAsset | CanonicalizedAsse
     evidence.sourceField = "nilaiAbcInput"; evidence.sourceCell = row?.sources.nilaiAbcInput ?? null;
     return { ...base, nilaiABC: asset.nilaiAbcInput, valueSource: "PROVIDED_ADJUSTED_VALUE", calculationMethod: "DIRECT_BOOK_VALUE", manualApprovalRequired: age.status === "AGE_IMPUTED", warnings: ["PROVIDED_ADJUSTED_VALUE", ...age.warnings] };
   }
-  const unresolved = (): ValuationResolution => ({ ...base, nilaiABC: null, valueSource: "UNRESOLVED", calculationMethod: "UNRESOLVED", manualApprovalRequired: true, warnings: age.warnings });
+  const unresolved = (): ValuationResolution => ({ ...base, nilaiABC: null, valueSource: "UNRESOLVED", calculationMethod: "UNRESOLVED", manualApprovalRequired: true, warnings: [...new Set([...age.warnings, ...(evidence.comparables?.warnings ?? [])])] });
   if (usefulLife.years === null || age.years === null || fieldHasError("usiaAsetTahun") || fieldHasError("tanggalOperasi")) return unresolved();
   let referencePrice: number | null = null, valueSource: ValuationSource = "SYSTEM_DEPRECIATION", warnings = [...age.warnings];
   if (isNonnegativeNumber(asset.hargaPengadaanSaatIni) && !fieldHasError("hargaPengadaanSaatIni")) {

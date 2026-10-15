@@ -53,4 +53,10 @@ describe("audited ABC book values", () => {
     const rule = { ...PERDIR_0299_RULES[0], years: 20, ruleVersion: "synthetic-approved-v2" };
     expect(resolveAssetValuation(valuationAsset({ hargaPengadaanSaatIni: 1000 }), { ...context, rules: [rule] })).toMatchObject({ nilaiABC: 500, evidence: { ruleVersion: "synthetic-approved-v2" } });
   });
+  it("surfaces quarantined donor identities when their conflict leaves value unresolved", () => {
+    const donor = { ...valuationAsset({ hargaPengadaanSaatIni: 1000 }), id: "duplicate" };
+    const result = resolveAssetValuation({ ...valuationAsset(), id: "target" }, { ...context, candidates: [donor, { ...donor, hargaPengadaanSaatIni: 2000 }] });
+    expect(result).toMatchObject({ nilaiABC: null, evidence: { comparables: { rejectedDonors: [{ id: "duplicate", code: "DONOR_ID_CONFLICT" }] } } });
+    expect(result.warnings).toContain("DONOR_ID_CONFLICT");
+  });
 });

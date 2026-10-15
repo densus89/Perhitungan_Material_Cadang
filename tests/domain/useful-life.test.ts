@@ -19,6 +19,10 @@ describe("audited useful life", () => {
   it("prefers exact code over curated equipment aliases", () => {
     expect(resolveUsefulLife(valuationAsset(), { asOf: "2026-10-15", aliases: [alias] }).years).toBe(40);
   });
+  it.each([["0", "UNRESOLVED"], ["2026-02-31", "UNRESOLVED"], ["2026-01-01", "RESOLVED"], ["2026-12-01", "UNRESOLVED"]] as const)("validates alias approval date %s", (approvedAt, status) => {
+    const asset = valuationAsset({ kodeClassAsset: null, kodeJenis: null, kodeSubjenis: null });
+    expect(resolveUsefulLife(asset, { asOf: "2026-10-15", aliases: [{ ...alias, approvedAt }] }).status).toBe(status);
+  });
   it("requires approval for ambiguous or unapproved aliases and has no global fallback", () => {
     const asset = valuationAsset({ kodeClassAsset: null, kodeJenis: null, kodeSubjenis: null });
     expect(resolveUsefulLife(asset, { asOf: "2026-10-15" })).toMatchObject({ status: "UNRESOLVED", years: null });

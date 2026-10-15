@@ -17,16 +17,17 @@ export interface DonorEvidence {
   rfqGroup: ApprovedRfqGroup | null; provenance: AssetRowProvenance | null;
   donorAgeYears: number | null; remainingLifeFactor: number | null; usefulLife: UsefulLifeResolution | null;
 }
+export interface RejectedDonorEvidence { id: string; code: "DONOR_ID_CONFLICT" }
 export interface ComparableSelection {
   status: "RESOLVED" | "UNRESOLVED"; tier: ComparableTier | null; median: number | null;
   candidateCount: number; min: number | null; max: number | null; dispersion: number | null;
-  selectedDonorIds: string[]; donors: DonorEvidence[]; warnings: string[];
+  selectedDonorIds: string[]; donors: DonorEvidence[]; rejectedDonors: RejectedDonorEvidence[]; warnings: string[];
 }
 export interface AgeResolution {
   status: "OPERATION_DATE" | "PROVIDED_AGE" | "AGE_IMPUTED" | "UNRESOLVED";
   years: number | null; tier: Exclude<ComparableTier, "NEAREST_LOCATION"> | null;
   donorIds: string[]; cohort: { id: string; years: number; provenance: AssetRowProvenance | null }[];
-  manualApprovalRequired: boolean; warnings: string[];
+  manualApprovalRequired: boolean; rejectedDonors: RejectedDonorEvidence[]; warnings: string[];
 }
 export interface ComparableOptions extends Partial<UsefulLifeOptions> {
   /** Audited MVP review thresholds, not PERDIR requirements. */
@@ -46,11 +47,40 @@ export function median(values: readonly number[]): number {
 export function assetEvidenceId(asset: ComparableAsset): string | null {
   return asset.id?.trim() || (asset.provenance ? `${asset.provenance.sheetName}!${asset.provenance.rowNumber}` : asset.noAset?.trim() || asset.tid?.trim() || null);
 }
+/** Fixed field order makes identity checking independent of input object key order.
+ * Condition and notes are excluded: neither is evidence for technical, price or age selection.
+ * Non-finite numbers stay distinct from null, so invalid conflicts cannot disappear in JSON.
+ */
+function donorMaterialEvidence(asset: ComparableAsset): string {
+  return JSON.stringify([
+    asset.unitInduk, asset.upt, asset.namaGi, asset.bayPenghantar, asset.tid, asset.noAset,
+    asset.namaPeralatan, asset.spesifikasiMara, asset.jumlah, asset.satuan,
+    asset.tanggalOperasi, asset.usiaAsetTahun, asset.kodeClassAsset, asset.kodeJenis, asset.kodeSubjenis,
+    asset.nilaiBukuSap, asset.hargaPengadaanSaatIni, asset.tanggalReferensiHarga, asset.nilaiAbcInput, asset.kodeMaterial,
+    asset.assetFunction ?? null, asset.normalizedSpecification ?? null,
+    asset.approvedRfqGroup ? [asset.approvedRfqGroup.id, asset.approvedRfqGroup.approvedBy, asset.approvedRfqGroup.approvedAt] : null,
+    asset.coordinates ? [asset.coordinates.latitude, asset.coordinates.longitude] : null,
+    asset.provenance ? [asset.provenance.sheetName, asset.provenance.rowNumber] : null,
+  ], (_key, value: unknown) => typeof value === "number" && !Number.isFinite(value) ? String(value) : value);
+}
+function deduplicateDonors(donors: readonly ComparableAsset[]) {
+  const records = new Map<string, { asset: ComparableAsset; material: string }>(), conflicts = new Set<string>();
+  for (const asset of donors) {
+    const id = assetEvidenceId(asset);
+    if (!id) continue;
+    const material = donorMaterialEvidence(asset), previous = records.get(id);
+    if (!previous) records.set(id, { asset, material });
+    else if (previous.material !== material) conflicts.add(id);
+  }
+  const rejectedDonors: RejectedDonorEvidence[] = [...conflicts].sort().map((id) => ({ id, code: "DONOR_ID_CONFLICT" }));
+  const unique = [...records].filter(([id]) => !conflicts.has(id)).sort(([a], [b]) => a.localeCompare(b)).map(([, record]) => record.asset);
+  return { unique, rejectedDonors, warnings: rejectedDonors.length ? ["DONOR_ID_CONFLICT"] : [] };
+}
 function same(a: string | null, b: string | null): boolean {
   return !!normalizeAssetText(a) && normalizeAssetText(a) === normalizeAssetText(b);
 }
 function approved(group: ApprovedRfqGroup | null | undefined, asOf?: string): group is ApprovedRfqGroup {
-  return !!(group?.id.trim() && group.approvedBy.trim() && group.approvedAt && (!asOf || group.approvedAt <= asOf));
+  return !!(group?.id.trim() && group.approvedBy.trim() && isIsoDate(group.approvedAt) && (!asOf || group.approvedAt <= asOf));
 }
 function compatibility(target: ComparableAsset, donor: ComparableAsset, asOf?: string): DonorEvidence["compatibility"] | null {
   if (!same(target.namaPeralatan, donor.namaPeralatan) || !same(target.satuan, donor.satuan)) return null;
@@ -96,18 +126,19 @@ export function knownAssetAge(asset: ComparableAsset, asOf?: string): Pick<AgeRe
 }
 export function imputeAssetAge(target: ComparableAsset, cohort: readonly ComparableAsset[], options: ComparableOptions = {}): AgeResolution {
   const known = knownAssetAge(target, options.asOf);
-  if (known.years !== null) return { ...known, tier: null, donorIds: [], cohort: [], manualApprovalRequired: false, warnings: [] };
+  if (known.years !== null) return { ...known, tier: null, donorIds: [], cohort: [], manualApprovalRequired: false, rejectedDonors: [], warnings: [] };
   // Invalid supplied age/date is not an absent age eligible for automatic imputation.
-  if (target.tanggalOperasi || target.usiaAsetTahun !== null) return { ...known, tier: null, donorIds: [], cohort: [], manualApprovalRequired: true, warnings: [] };
-  const candidates = cohort.flatMap((donor) => {
+  if (target.tanggalOperasi || target.usiaAsetTahun !== null) return { ...known, tier: null, donorIds: [], cohort: [], manualApprovalRequired: true, rejectedDonors: [], warnings: [] };
+  const deduplicated = deduplicateDonors(cohort);
+  const candidates = deduplicated.unique.flatMap((donor) => {
     const id = assetEvidenceId(donor), age = knownAssetAge(donor, options.asOf);
     return donor !== target && id && id !== assetEvidenceId(target) && age.years !== null && compatibility(target, donor, options.asOf) ? [{ id, years: age.years, tier: locationTier(target, donor), provenance: donor.provenance ?? null }] : [];
   });
   for (const tier of ["SAME_GI", "SAME_UPT", "SAME_UNIT", "NATIONAL"] as const) {
     const selected = candidates.filter((entry) => entry.tier === tier).sort((a, b) => a.id.localeCompare(b.id));
-    if (selected.length) return { years: median(selected.map((entry) => entry.years)), status: "AGE_IMPUTED", tier, donorIds: selected.map((entry) => entry.id), cohort: selected.map(({ id, years, provenance }) => ({ id, years, provenance })), manualApprovalRequired: true, warnings: ["AGE_IMPUTED"] };
+    if (selected.length) return { years: median(selected.map((entry) => entry.years)), status: "AGE_IMPUTED", tier, donorIds: selected.map((entry) => entry.id), cohort: selected.map(({ id, years, provenance }) => ({ id, years, provenance })), manualApprovalRequired: true, rejectedDonors: deduplicated.rejectedDonors, warnings: [...deduplicated.warnings, "AGE_IMPUTED", ...(selected.length === 1 ? ["SINGLE_DONOR"] : [])] };
   }
-  return { years: null, status: "UNRESOLVED", tier: null, donorIds: [], cohort: [], manualApprovalRequired: true, warnings: [] };
+  return { years: null, status: "UNRESOLVED", tier: null, donorIds: [], cohort: [], manualApprovalRequired: true, rejectedDonors: deduplicated.rejectedDonors, warnings: deduplicated.warnings };
 }
 export function priceDateWarnings(date: string | null, asOf?: string, stalePriceYears = 3): string[] {
   if (!date) return ["MISSING_PRICE_DATE"];
@@ -117,7 +148,8 @@ export function priceDateWarnings(date: string | null, asOf?: string, stalePrice
   return [];
 }
 export function rankComparableCandidates(target: ComparableAsset, candidates: readonly ComparableAsset[], options: ComparableOptions = {}): ComparableSelection {
-  const eligible = candidates.flatMap((donor) => {
+  const deduplicated = deduplicateDonors(candidates);
+  const eligible = deduplicated.unique.flatMap((donor) => {
     const id = assetEvidenceId(donor), match = compatibility(target, donor, options.asOf);
     if (donor === target || !id || id === assetEvidenceId(target) || !match) return [];
     const priceWarnings = priceDateWarnings(donor.tanggalReferensiHarga, options.asOf, options.stalePriceYears);
@@ -132,7 +164,8 @@ export function rankComparableCandidates(target: ComparableAsset, candidates: re
       donorAgeYears = knownAssetAge(donor, asOf).years;
       const book = isNonnegativeNumber(donor.nilaiBukuSap) ? donor.nilaiBukuSap : donor.nilaiBukuSap === null && isNonnegativeNumber(donor.nilaiAbcInput) ? donor.nilaiAbcInput : null;
       if (book === null || donorAgeYears === null || usefulLife.years === null) return [];
-      remainingLifeFactor = 1 - donorAgeYears / usefulLife.years;
+      // Divide remaining years directly: 1 - 32/40 rounds below the exact 0.20 cutoff.
+      remainingLifeFactor = (usefulLife.years - donorAgeYears) / usefulLife.years;
       if (remainingLifeFactor < (options.minimumRemainingLifeFactor ?? 0.2) || remainingLifeFactor <= 0) return [];
       referencePrice = book / remainingLifeFactor; basis = "GROSSED_UP_BOOK_VALUE";
       if (!Number.isFinite(referencePrice) || referencePrice <= 0) return [];
@@ -155,11 +188,11 @@ export function rankComparableCandidates(target: ComparableAsset, candidates: re
     const prices = selected.map((entry) => entry.referencePrice), value = median(prices);
     const min = prices.reduce((result, price) => Math.min(result, price), Infinity), max = prices.reduce((result, price) => Math.max(result, price), -Infinity);
     const dispersion = value > 0 ? (max - min) / value : 0;
-    const warnings = [...new Set(selected.flatMap((entry) => priceDateWarnings(entry.priceDate, options.asOf, options.stalePriceYears)))];
+    const warnings = [...new Set([...deduplicated.warnings, ...selected.flatMap((entry) => priceDateWarnings(entry.priceDate, options.asOf, options.stalePriceYears))])];
     if (selected.length === 1) warnings.push("SINGLE_DONOR");
     if (dispersion > (options.highDispersionThreshold ?? 0.5)) warnings.push("HIGH_DISPERSION");
     if (tier !== "SAME_GI") warnings.push(`DONOR_${tier}`);
-    return { status: "RESOLVED", tier, median: value, candidateCount: selected.length, min, max, dispersion, selectedDonorIds: selected.map((entry) => entry.id), donors: selected, warnings };
+    return { status: "RESOLVED", tier, median: value, candidateCount: selected.length, min, max, dispersion, selectedDonorIds: selected.map((entry) => entry.id), donors: selected, rejectedDonors: deduplicated.rejectedDonors, warnings };
   }
-  return { status: "UNRESOLVED", tier: null, median: null, candidateCount: 0, min: null, max: null, dispersion: null, selectedDonorIds: [], donors: [], warnings: [] };
+  return { status: "UNRESOLVED", tier: null, median: null, candidateCount: 0, min: null, max: null, dispersion: null, selectedDonorIds: [], donors: [], rejectedDonors: deduplicated.rejectedDonors, warnings: deduplicated.warnings };
 }

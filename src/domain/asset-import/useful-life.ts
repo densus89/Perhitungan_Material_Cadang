@@ -26,7 +26,7 @@ export function isIsoDate(value: string): boolean {
 export function resolveUsefulLife(asset: UsefulLifeAsset, options: UsefulLifeOptions): UsefulLifeResolution {
   const rules = (options.rules ?? PERDIR_0299_RULES).filter((rule) => isIsoDate(options.asOf) && rule.effectiveFrom <= options.asOf && (!rule.effectiveTo || options.asOf < rule.effectiveTo) && Number.isFinite(rule.years) && rule.years > 0 && (!asset.assetFunction || normalizeAssetText(asset.assetFunction) === rule.assetFunction));
   const exact = rules.filter((rule) => asset.kodeClassAsset === rule.classCode && asset.kodeJenis === rule.typeCode && asset.kodeSubjenis === rule.subtypeCode);
-  const aliases = (options.aliases ?? PERDIR_0299_ALIASES).filter((alias) => normalizeAssetText(alias.alias) === normalizeAssetText(asset.namaPeralatan) && alias.approvedBy?.trim() && alias.approvedAt && alias.approvedAt <= options.asOf && alias.evidence.trim());
+  const aliases = (options.aliases ?? PERDIR_0299_ALIASES).filter((alias) => normalizeAssetText(alias.alias) === normalizeAssetText(asset.namaPeralatan) && alias.approvedBy?.trim() && alias.approvedAt && isIsoDate(alias.approvedAt) && alias.approvedAt <= options.asOf && alias.evidence.trim());
   const aliasRules = rules.filter((rule) => aliases.some((alias) => alias.ruleIds.includes(rule.id)));
   const candidates = exact.length ? exact : aliasRules;
   const resolved = candidates.length === 1;
