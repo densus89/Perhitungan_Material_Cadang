@@ -1,0 +1,66 @@
+import { CANONICAL_ASSET_FIELDS } from "./fields";
+import { columnLetter, normalizeHeader } from "./normalize-header";
+import { parseAssetDate, parseLocalizedNumber, readCellScalar } from "./parse-value";
+import type { AssetCondition, AssetRowProvenance, AssetSheetMapping, CanonicalAssetInput, CanonicalizedAssetRow } from "./types";
+
+const conditions: readonly AssetCondition[] = ["P0", "P1", "P2", "P3", "P4"];
+
+function isBlank(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === "string" && !value.trim();
+}
+
+export function canonicalizeAssetRow(row: readonly unknown[], mapping: AssetSheetMapping, provenance: AssetRowProvenance): CanonicalizedAssetRow {
+  const asset = Object.fromEntries(CANONICAL_ASSET_FIELDS.map((field) => [field.key, null])) as unknown as CanonicalAssetInput;
+  const sources: CanonicalizedAssetRow["sources"] = {};
+  const issues: CanonicalizedAssetRow["issues"] = [];
+  for (const column of mapping.columns) {
+    if (!column.field) continue;
+    const field = CANONICAL_ASSET_FIELDS.find((definition) => definition.key === column.field)!;
+    const rawValue = row[column.columnIndex - 1] ?? null;
+    const scalar = readCellScalar(rawValue);
+    const address = `${columnLetter(column.columnIndex)}${provenance.rowNumber}`;
+    sources[field.key] = { ...provenance, columnIndex: column.columnIndex, address, rawValue, ...(scalar.formula === undefined ? {} : { formula: scalar.formula }) };
+    const issue = (code: string) => issues.push({ code, severity: "ERROR", message: `Invalid ${field.header} at ${address}`, field: field.key, address });
+    if (scalar.issue) { issue(scalar.issue); continue; }
+    const value = scalar.value;
+    if (value === null || value === undefined || typeof value === "string" && !value.trim()) continue;
+    let converted: string | number | null = null;
+    if (field.format === "NUMBER" || field.format === "MONEY") {
+      const parsed = parseLocalizedNumber(value);
+      converted = parsed.value;
+      if (parsed.issue) issue(scalar.formula ? "INVALID_FORMULA_RESULT" : parsed.issue);
+      else if (parsed.value !== null && parsed.value < 0) issue(field.key === "jumlah" ? "NON_POSITIVE_QUANTITY" : "NEGATIVE_NUMBER");
+      else if (field.key === "jumlah" && parsed.value === 0) issue("NON_POSITIVE_QUANTITY");
+    } else if (field.format === "DATE") {
+      converted = parseAssetDate(value);
+      if (!converted) issue(scalar.formula ? "INVALID_FORMULA_RESULT" : "INVALID_DATE");
+    } else if (field.format === "CONDITION") {
+      const condition = normalizeHeader(value);
+      if (conditions.includes(condition as AssetCondition)) converted = condition;
+      else issue(scalar.formula ? "INVALID_FORMULA_RESULT" : "INVALID_CONDITION");
+    } else if (typeof value === "string" || typeof value === "number" && Number.isFinite(value)) converted = String(value).trim();
+    else issue(scalar.formula ? "INVALID_FORMULA_RESULT" : "INVALID_TEXT");
+    // The field's conversion is selected from the single canonical definition above.
+    Object.assign(asset, { [field.key]: converted });
+  }
+  for (const field of CANONICAL_ASSET_FIELDS) {
+    if (field.requirement === "REQUIRED" && asset[field.key] === null && !issues.some((issue) => issue.field === field.key)) {
+      const address = sources[field.key]?.address;
+      issues.push({ code: "MISSING_REQUIRED_FIELD", severity: "ERROR", message: `Missing ${field.header}`, field: field.key, ...(address ? { address } : {}) });
+    }
+  }
+  const ageSource = asset.tanggalOperasi ? "OPERATION_DATE" : asset.usiaAsetTahun !== null && asset.usiaAsetTahun >= 0 ? "PROVIDED_AGE" : "MISSING";
+  if (asset.tanggalOperasi) asset.usiaAsetTahun = null;
+  const firstLabel = mapping.columns
+    .filter((column) => column.field && column.field !== "keterangan")
+    .sort((a, b) => a.columnIndex - b.columnIndex)
+    .map((column) => normalizeHeader(readCellScalar(row[column.columnIndex - 1]).value))
+    .find(Boolean) ?? "";
+  let rejectionReason: CanonicalizedAssetRow["rejectionReason"] = null;
+  if (row.every(isBlank)) rejectionReason = "BLANK";
+  else if (/^(?:CONTOH|EXAMPLE|SAMPLE)(?: |$)/.test(firstLabel)) rejectionReason = "EXAMPLE";
+  else if (/^(?:SUBTOTAL|SUB TOTAL|GRAND TOTAL|TOTAL)(?: |$)/.test(firstLabel)) rejectionReason = "SUBTOTAL";
+  else if (mapping.columns.filter((column) => column.field && normalizeHeader(row[column.columnIndex - 1]) === column.normalizedHeader).length >= 4) rejectionReason = "REPEATED_HEADER";
+  else if (!(asset.tid || asset.noAset || asset.namaGi || asset.bayPenghantar || asset.unitInduk || asset.upt) || !(asset.namaPeralatan || asset.spesifikasiMara) || !sources.jumlah || isBlank(sources.jumlah.rawValue) || !asset.satuan) rejectionReason = "INCOMPLETE_CANDIDATE";
+  return { asset, provenance, sources, issues, ageSource, candidate: rejectionReason === null, rejectionReason };
+}

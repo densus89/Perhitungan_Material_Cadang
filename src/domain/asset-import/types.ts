@@ -56,3 +56,55 @@ export interface RowIssue {
   message: string;
   field?: keyof CanonicalAssetInput;
 }
+
+/** Zero-based row arrays; source column indexes and row numbers are one-based. */
+export interface AssetWorkbookGrid {
+  sheets: readonly { name: string; rows: readonly (readonly unknown[])[] }[];
+}
+
+export interface AssetColumnMapping {
+  columnIndex: number;
+  columnLetter: string;
+  header: string;
+  normalizedHeader: string;
+  field: keyof CanonicalAssetInput | null;
+  confidence: number;
+}
+
+export interface AssetSheetMapping {
+  sheetName: string;
+  headerRow: number;
+  columns: AssetColumnMapping[];
+  confidence: number;
+  score: number;
+  missingRequiredFields: (keyof CanonicalAssetInput)[];
+  ambiguousFields: (keyof CanonicalAssetInput)[];
+}
+
+export interface WorkbookLayoutProposal {
+  selected: AssetSheetMapping | null;
+  candidates: AssetSheetMapping[];
+  requiresConfirmation: boolean;
+}
+
+export interface AssetRowProvenance {
+  sheetName: string;
+  rowNumber: number;
+}
+
+export interface AssetCellSource extends AssetRowProvenance {
+  columnIndex: number;
+  address: string;
+  rawValue: unknown;
+  formula?: string;
+}
+
+export interface CanonicalizedAssetRow {
+  asset: CanonicalAssetInput;
+  provenance: AssetRowProvenance;
+  sources: Partial<Record<keyof CanonicalAssetInput, AssetCellSource>>;
+  issues: (RowIssue & { address?: string })[];
+  ageSource: "OPERATION_DATE" | "PROVIDED_AGE" | "MISSING";
+  candidate: boolean;
+  rejectionReason: "BLANK" | "EXAMPLE" | "SUBTOTAL" | "REPEATED_HEADER" | "INCOMPLETE_CANDIDATE" | null;
+}
