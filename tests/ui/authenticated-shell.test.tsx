@@ -6,7 +6,7 @@ import { useActor } from "../../src/state/AuthWorkspaceProvider";
 import type { AppRole } from "../../src/domain/access";
 import { workspaceActor, workspaceUnits } from "../fixtures/workspace-actor";
 import SummaryPage from "../../app/(workspace)/ringkasan/page";
-import ImportPage from "../../app/(workspace)/impor/page";
+import { ImportWorkspace } from "../../src/features/import/ImportWorkspace";
 import MappingPage from "../../app/(workspace)/pemetaan-rfq/page";
 import AbcPage from "../../app/(workspace)/analisis-abc/page";
 import PolicyPage from "../../app/(workspace)/inventory-policy/page";
@@ -87,11 +87,17 @@ describe("authenticated workspace shell", () => {
   });
 
   it.each([
-    ["/ringkasan/", SummaryPage], ["/impor/", ImportPage], ["/pemetaan-rfq/", MappingPage],
+    ["/ringkasan/", SummaryPage], ["/pemetaan-rfq/", MappingPage],
     ["/analisis-abc/", AbcPage], ["/inventory-policy/", PolicyPage], ["/prioritas-lokasi/", LocationPage], ["/ekspor/", ExportPage],
   ])("keeps the visible Data Demo warning on authenticated %s", (pathname, Page) => {
     render(<PathnameContext.Provider value={pathname}><AuthenticatedWorkspace actor={workspaceActor}><Page /></AuthenticatedWorkspace></PathnameContext.Provider>);
     expect(screen.getByText("Data Demo")).toBeVisible();
     expect(screen.getByRole("main")).toBeInTheDocument();
+  });
+  it("identifies persistent import without demo labels or synthetic-data claims", () => {
+    render(<PathnameContext.Provider value="/impor/"><AuthenticatedWorkspace actor={workspaceActor} units={workspaceUnits}><ImportWorkspace actorUnits={[...workspaceUnits]} initialDrafts={[]} /></AuthenticatedWorkspace></PathnameContext.Provider>);
+    expect(screen.queryByText(/Data Demo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Modul perencanaan menggunakan skenario sintetis/)).not.toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveTextContent("persetujuan DIV RST");
   });
 });

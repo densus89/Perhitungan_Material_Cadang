@@ -6,7 +6,7 @@ import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.share
 import type { NextRouter } from "next/router";
 import { AuthenticatedWorkspace } from "../../src/features/auth/AuthenticatedWorkspace";
 import { workspaceActor } from "../fixtures/workspace-actor";
-import ImportPage from "../../app/(workspace)/impor/page";
+import { ImportWorkspace } from "../../src/features/import/ImportWorkspace";
 import MappingPage from "../../app/(workspace)/pemetaan-rfq/page";
 import SummaryPage from "../../app/(workspace)/ringkasan/page";
 
@@ -25,7 +25,7 @@ function ClientNavigationWorkspace({ initialPath = "/impor/" }: { initialPath?: 
   };
   return <RouterContext.Provider value={router}><PathnameContext.Provider value={path}>
     <output aria-label="Rute aktif">{path}</output>
-    <AuthenticatedWorkspace actor={workspaceActor}>{path === "/impor/" ? <ImportPage /> : path === "/pemetaan-rfq/" ? <MappingPage /> : path === "/ringkasan/" ? <SummaryPage /> : <p>Tujuan alur: {path}</p>}</AuthenticatedWorkspace>
+    <AuthenticatedWorkspace actor={workspaceActor}>{path === "/impor/" ? <ImportWorkspace initialDrafts={[]} actorUnits={[{ id: "unit-jbb", name: "UIT Jawa Bagian Barat" }]} /> : path === "/pemetaan-rfq/" ? <MappingPage /> : path === "/ringkasan/" ? <SummaryPage /> : <p>Tujuan alur: {path}</p>}</AuthenticatedWorkspace>
   </PathnameContext.Provider></RouterContext.Provider>;
 }
 
@@ -74,25 +74,18 @@ describe("workspace client navigation", () => {
     expect(screen.getByRole("link", { name: "Lewati ke konten utama" })).toHaveAttribute("href", "#konten-utama");
   });
 
-  it("keeps import stage, file metadata, and approvals across same-layout view round trips", () => {
+  it("keeps approvals across production import view round trips", () => {
     render(<ClientNavigationWorkspace />);
-    const file = new File(["metadata only"], "sesi-demo.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    fireEvent.change(screen.getByLabelText("Pilih berkas lokal (metadata saja)"), { target: { files: [file] } });
-    for (const stage of ["Mapping", "Validasi", "Siap"]) fireEvent.click(screen.getByRole("button", { name: `Lanjut ke ${stage}` }));
-
-    clickClientLink(screen.getByRole("link", { name: "Tinjau pemetaan RFQ" }));
+    expect(screen.getByLabelText("Berkas snapshot XLSX")).toBeVisible();
+    clickClientLink(within(screen.getByRole("navigation", { name: "Navigasi utama" })).getByRole("link", { name: "Pemetaan RFQ" }));
     expect(screen.getByRole("heading", { level: 1, name: "Pemetaan RFQ" })).toBeVisible();
     const pendingRow = screen.getByRole("row", { name: /mapping-near\s/ });
     fireEvent.click(within(pendingRow).getByRole("button", { name: "Setujui" }));
 
     const nav = screen.getByRole("navigation", { name: "Navigasi utama" });
     clickClientLink(within(nav).getByRole("link", { name: "Impor" }));
-    expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent("Siap");
-    expect(screen.getByText(/1 pemetaan masih menunggu approval/)).toBeVisible();
-    for (let index = 0; index < 3; index++) fireEvent.click(screen.getByRole("button", { name: "Kembali" }));
-    expect(screen.getByText("sesi-demo.xlsx")).toBeVisible();
-    expect(screen.getByText(`${file.size} byte`)).toBeVisible();
-    expect(screen.getByText(file.type)).toBeVisible();
+    expect(screen.getByLabelText("Berkas snapshot XLSX")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Unggah dan proses di server" })).toBeDisabled();
 
     clickClientLink(within(nav).getByRole("link", { name: "Pemetaan RFQ" }));
     fireEvent.change(screen.getByLabelText("Status pemetaan"), { target: { value: "ALL" } });

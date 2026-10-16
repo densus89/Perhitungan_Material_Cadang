@@ -8,6 +8,8 @@ import { readAssetWorkbook } from "../../lib/spreadsheet/read-asset-workbook";
 import type { AssetSheetMapping } from "../../domain/asset-import/types";
 import type { Json } from "../../lib/supabase/database.types";
 import type { ImportDependencies, Row } from "./dependencies";
+import { loadImportReview, loadImportComparison } from "./workspace";
+import type { ImportReviewQuery } from "../../domain/asset-import/schemas";
 
 export class ImportError extends Error {
   constructor(readonly code: "FORBIDDEN" | "NOT_FOUND" | "INVALID_INPUT" | "SOURCE_MISMATCH" | "NOT_READY" | "PREVIEW_MISMATCH" | "PROCESS_FAILED" | "CONFLICT" | "REFERENCE_UNAVAILABLE" | "COMPARISON_FAILED", readonly status = 409) { super(code); }
@@ -100,7 +102,7 @@ export async function saveImportMapping(actor: Actor, input: z.infer<typeof save
   catch { throw new ImportError("CONFLICT"); }
   return loadAssetImport(actor, session.id, deps);
 }
-export async function loadAssetImport(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {
+export async function loadAssetImport(actor: Actor, importId: string, deps: ImportDependencies, options: ImportReviewQuery = { offset: 0, filter: "ALL" }): Promise<ImportResponse> {
   const { session, source, version } = await ownedImport(actor, importId, deps);
   const sheets = await deps.list("import_sheets", { import_session_id: session.id, unit_induk_id: session.unit_induk_id });
   const selected = sheets.find((sheet) => sheet.selected), runs = await deps.list("asset_import_runs", { import_session_id: session.id });
@@ -114,6 +116,8 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
   if (runs.some((run) => run.status === "PROCESSING")) stage = "PROCESSING";
   if (["PENDING_RST", "ACTIVE", "HISTORICAL", "NEEDS_FIX"].includes(version.status)) stage = version.status as ImportResponse["stage"];
   const result: ImportResponse = { importId, datasetId: session.dataset_id, versionId: version.id, stage };
+  result.source = { unitId: session.unit_induk_id, fileName: source.original_name, byteSize: source.byte_size, sha256: source.sha256 };
+  if (typeof diagnostics?.ruleVersion === "string") result.ruleVersion = diagnostics.ruleVersion;
   if (stage === "UPLOAD") result.upload = await deps.sign(source.object_path);
   const mapping = sheetMappingSchema.safeParse(diagnostics?.mapping ?? (sheets[0]?.diagnostics as Record<string, Json> | undefined)?.proposal);
   if (mapping.success) {
@@ -128,6 +132,10 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
   const summary = importSummarySchema.safeParse(metadata?.summary); if (summary.success && currentMatches) { result.summary = summary.data; if (summary.data.blockingErrors && stage === "READY_TO_SUBMIT") result.stage = "NEEDS_FIX"; }
   if (currentMatches && !metadata?.comparison_ready && stage === "READY_TO_SUBMIT") { result.stage = "FAILED"; result.failureCode = "COMPARISON_FAILED"; }
   if (latest?.status === "FAILED") result.failureCode = "PROCESS_FAILED";
+  if (currentMatches && current) {
+    result.review = await loadImportReview(session.unit_induk_id, current.id, deps, options);
+    result.comparison = await loadImportComparison(session.unit_induk_id, current.id, Boolean(metadata?.comparison_base_version_id), deps, result.summary?.rowCount ?? current.expected_row_count);
+  }
   return result;
 }
 export async function submitAssetVersion(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {

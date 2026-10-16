@@ -25,3 +25,12 @@ it("create route rejects forged paths and assigned-scope misuse", async () => {
   const response = await POST(new Request("https://material.example/api/imports/", { method: "POST", headers: { Origin: "https://material.example", "Content-Type": "application/json" }, body: JSON.stringify({ unitId, objectPath: "unit/other/file.xlsx" }) }));
   expect(response.status).toBe(422); expect(mocks.admin).not.toHaveBeenCalled();
 });
+it.each(["offset=-1", "offset=Infinity", "offset=10000001", "filter=RAW", "issue=AGE),other.eq.secret", "source=RAW", "condition=P6", "search=" + "a".repeat(101)])("GET rejects invalid review query %s without privilege", async query => {
+  const result = await GET(new Request(`https://material.example/api/imports/${actor.userId}/?${query}`), { params: Promise.resolve({ importId: actor.userId }) });
+  expect(result.status).toBe(422); expect(result.headers.get("cache-control")).toContain("private, no-store"); expect(mocks.admin).not.toHaveBeenCalled();
+});
+it("GET rejects a cross-unit import before constructing a privileged client", async () => {
+  mocks.session.mockResolvedValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { unit_induk_id: "other-unit" }, error: null }) }) }) }) });
+  const result = await GET(new Request(`https://material.example/api/imports/${actor.userId}/`), { params: Promise.resolve({ importId: actor.userId }) });
+  expect(result.status).toBe(404); expect(mocks.admin).not.toHaveBeenCalled();
+});

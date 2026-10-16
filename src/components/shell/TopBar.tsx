@@ -6,7 +6,7 @@ import { useActor, useAssignedUnits } from "../../state/AuthWorkspaceProvider";
 import type { AppRole } from "../../domain/access";
 import { LogoutButton } from "../../features/auth/LogoutButton";
 import { logoutAction } from "../../../app/auth/actions";
-import { isPlanningRoute } from "./presentation";
+import { isPlanningRoute, normalizeWorkspacePath } from "./presentation";
 import styles from "./shell.module.css";
 
 const roleLabels: Record<AppRole, string> = {
@@ -30,7 +30,7 @@ export function TopBar() {
   const pathname = usePathname();
   const displayName = resolveDisplayName(actor.displayName, actor.email);
   const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("id-ID");
-  const showDemoBadge = isPlanningRoute(pathname);
+  const showDemoBadge = isPlanningRoute(pathname) && normalizeWorkspacePath(pathname) !== "/impor";
   return (
     <header className={`topbar ${styles.header}`}>
       <div className={styles.context}>

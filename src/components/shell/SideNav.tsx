@@ -44,7 +44,7 @@ export function SideNav() {
         <p className="nav-section-label">ADMINISTRASI</p>
         <nav aria-label="Administrasi"><Link href="/admin/pengguna/" aria-current={currentPath === "/admin/pengguna" ? "page" : undefined}><Users size={18} aria-hidden="true" /><span>Kelola Pengguna</span></Link></nav>
       </section>}
-      <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div>{planningContext ? <><strong>Perencanaan Data Demo</strong><p>Modul perencanaan memakai data sintetis.</p></> : <><strong>Administrasi Pengguna</strong><p>Kelola akses dan penugasan pengguna.</p></>}</div></div>
+      <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div>{currentPath === "/impor" ? <><strong>Snapshot aset unit</strong><p>Draft tersimpan dan persetujuan DIV RST.</p></> : planningContext ? <><strong>Perencanaan Data Demo</strong><p>Modul perencanaan memakai data sintetis.</p></> : <><strong>Administrasi Pengguna</strong><p>Kelola akses dan penugasan pengguna.</p></>}</div></div>
     </aside>
   );
 }

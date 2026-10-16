@@ -12,6 +12,22 @@ export function fakeDependencies() {
   const matching = (record: Record<string, unknown>, filters: Record<string, unknown>) => Object.entries(filters).every(([key, value]) => record[key] === value);
   const deps: ImportDependencies = {
     id: randomUUID, now: () => "2026-10-16T00:00:00.000Z",
+    async reviewPage(unitId, runId, options) {
+      const rows = (tables.asset_snapshot_rows ?? []).filter(row => row.unit_induk_id === unitId && row.import_run_id === runId).filter(row => {
+        const value = tables.asset_valuations?.find(value => value.asset_row_id === row.id && value.unit_induk_id === unitId && value.import_run_id === runId);
+        const errors = row.error_codes as string[], warnings = row.warning_codes as string[], source = String(value?.value_source ?? "");
+        const match = options.filter === "ALL" || options.filter === "ERROR" && errors.length > 0 || options.filter === "WARNING" && warnings.length > 0 || options.filter === "ESTIMATED" && (source.startsWith("ESTIMATED") || source === "SYSTEM_DEPRECIATION") || options.filter === "AGE_IMPUTED" && value?.age_status === "AGE_IMPUTED";
+        return match && (!options.issue || [...errors, ...warnings].includes(options.issue)) && (!options.source || value?.value_source === options.source) && (!options.condition || (options.condition === "MISSING" ? row.kondisi_aset == null : row.kondisi_aset === options.condition)) && (!options.search || String(row.nama_peralatan).toLowerCase().includes(options.search.toLowerCase()));
+      }).sort((a, b) => Number(a.source_row_number) - Number(b.source_row_number));
+      const page = rows.slice(options.offset, options.offset + 100);
+      events.push("review:rows:" + page.length);
+      return { rows: structuredClone(page) as never, totalRows: rows.length };
+    },
+    async reviewValues(unitId, runId, rowIds) {
+      if (rowIds.length > 100) throw new Error("Review evidence exceeds page");
+      events.push("review:values:" + rowIds.length);
+      return structuredClone((tables.asset_valuations ?? []).filter(value => value.unit_induk_id === unitId && value.import_run_id === runId && rowIds.includes(String(value.asset_row_id)))) as never;
+    },
     async list<T extends ImportTable>(table: T, filters: Partial<Row<T>>) { return structuredClone((tables[table] ?? []).filter((row) => matching(row, filters))) as Row<T>[]; },
     async insert<T extends ImportTable>(table: T, rows: Insert<T>[]) {
       events.push(`insert:${table}:${rows.length}`);

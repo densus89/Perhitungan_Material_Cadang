@@ -1,0 +1,29 @@
+.stack { display: grid; gap: 20px; min-width: 0; }
+.stack > [role="region"] { max-height: 420px; overflow: auto; }
+.stack > [role="region"] thead { position: sticky; top: 0; z-index: 1; background: #f4f7f9; }
+.workspace { display: grid; gap: 24px; }
+.sourceGrid, .mappingGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.mappingGrid { gap: 20px 28px; }
+.mappingGrid select { width: 100%; }
+.mappingGrid p { margin: 6px 0 0; }
+.fileBox { display: grid; gap: 10px; padding: 24px; border: 1px dashed var(--border-strong, #aacbd0); border-radius: 12px; background: var(--surface-subtle, #f4f9f9); }
+.fileBox input { max-width: 100%; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.metrics > div { display: grid; gap: 8px; padding: 18px; border: 1px solid var(--border, #dce6e8); border-radius: 12px; }
+.metrics span { color: var(--text-muted, #516972); font-size: 12px; }
+.metrics strong { color: var(--text-strong, #123c48); font-size: 20px; overflow-wrap: anywhere; }
+.notice { padding: 18px 20px; background: #fff9e9; color: #72551f; border: 1px solid #ebd9ac; border-radius: 10px; line-height: 1.7; }
+.notice p { margin: 8px 0 0; }
+.check { display: flex; align-items: flex-start; gap: 10px; line-height: 1.7; padding: 16px; border: 1px solid var(--border, #dce6e8); border-radius: 10px; }
+.check input { margin-top: 6px; flex: none; width: 16px; height: 16px; accent-color: #007f8b; }
+.evidence { display: grid; gap: 8px; font-size: 12px; }
+.evidence dt { font-weight: 600; }
+.evidence dd { margin: 0 0 10px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+.tags { display: flex; gap: 10px; flex-wrap: wrap; }
+.tags span { padding: 8px 12px; background: #edf6f6; border-radius: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.error { color: #a62d32; font-weight: 600; }
+.drafts { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.drafts li { display: flex; gap: 16px; justify-content: space-between; align-items: center; border-top: 1px solid var(--border, #dce6e8); padding-top: 14px; }
+.drafts p { margin: 5px 0; overflow-wrap: anywhere; }
+.status { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+@media (max-width: 760px) { .sourceGrid, .mappingGrid { grid-template-columns: minmax(0, 1fr); } .drafts li { align-items: flex-start; flex-direction: column; } .fileBox { padding: 18px; } .metrics strong { font-size: 18px; } }

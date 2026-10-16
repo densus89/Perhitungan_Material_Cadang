@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import WorkspaceLayout from "../../../app/(workspace)/layout";
 import Home from "../../../app/page";
+import ImportPage from "../../../app/(workspace)/impor/page";
 
 const boundary = vi.hoisted(() => ({ createClient: vi.fn() }));
 vi.mock("server-only", () => ({}));
@@ -47,10 +48,15 @@ beforeEach(() => {
           };
           return { data: rows[table], error: null };
         },
-        async in(column: string, ids: string[]) {
+        in(column: string, ids: string[]) {
+          if (table === "import_sessions") {
+            const result = Promise.resolve({ data: [], error: null });
+            const query = Object.assign(result, { order: vi.fn(), limit: vi.fn() });
+            query.order.mockReturnValue(query); query.limit.mockReturnValue(query); return query;
+          }
           if (table !== "unit_induk" || column !== "id") throw new Error("Wrong assigned-unit lookup");
           unitQueries.push([...ids]);
-          return { data: fixture.unitRows, error: fixture.unitError ? { message: "private database error" } : null };
+          return Promise.resolve({ data: fixture.unitRows, error: fixture.unitError ? { message: "private database error" } : null });
         },
       }; } };
     },
@@ -134,5 +140,23 @@ describe("root session redirect", () => {
     fixture.status = access === "disabled" ? "DISABLED" : "ACTIVE";
     fixture.roles = access === "missing-role" ? [] : [{ role: "UNIT_OPERATOR" }];
     await expect(Promise.resolve().then(() => Home())).rejects.toMatchObject({ digest: expect.stringContaining("/login/") });
+  });
+});
+
+describe("persistent import page access", () => {
+  it("passes verified assigned units and persisted draft data from the async page", async () => {
+    const page = await ImportPage();
+    expect(page.props.actorUnits).toEqual([{ id: "unit-jbb", name: "UIT Jawa Bagian Barat" }, { id: "unit-jbt", name: "UIT Jawa Bagian Tengah" }]);
+    expect(page.props.initialDrafts).toEqual([]);
+    expect(unitQueries).toEqual([["unit-jbb", "unit-jbt"]]);
+  });
+  it("redirects an unauthenticated session before loading private drafts", async () => {
+    fixture.authenticated = false;
+    await expect(Promise.resolve().then(() => ImportPage())).rejects.toMatchObject({ digest: expect.stringContaining("/login/") });
+  });
+  it.each(["VIEWER", "RST_REVIEWER"])("denies %s import mutation workspace", async role => {
+    fixture.roles = [{ role }];
+    expect(renderToStaticMarkup(await ImportPage())).toContain("Operator Unit");
+    expect(unitQueries).toEqual([]);
   });
 });

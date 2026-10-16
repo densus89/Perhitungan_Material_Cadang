@@ -1,42 +1,77 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
-import ImportPage from "../../app/(workspace)/impor/page";
-import { AuthenticatedDemoWorkspace as WorkspaceLayout } from "../fixtures/AuthenticatedDemoWorkspace";
-
-describe("metadata-only import demo", () => {
-  it("displays local file metadata without reading or uploading its contents", () => {
-    render(<PathnameContext.Provider value="/impor/"><WorkspaceLayout><ImportPage /></WorkspaceLayout></PathnameContext.Provider>);
-    const file = new File(["PRIVATE_CONTENT_MUST_NOT_APPEAR"], "contoh-lokal.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const readText = vi.fn(() => { throw new Error("Content reads are forbidden"); });
-    const readBuffer = vi.fn(() => { throw new Error("Content reads are forbidden"); });
-    Object.defineProperties(file, { text: { value: readText }, arrayBuffer: { value: readBuffer } });
-
-    fireEvent.change(screen.getByLabelText("Pilih berkas lokal (metadata saja)"), { target: { files: [file] } });
-
-    expect(screen.getByText("contoh-lokal.xlsx")).toBeVisible();
-    expect(screen.getByText(`${file.size} byte`)).toBeVisible();
-    expect(screen.getByText(file.type)).toBeVisible();
-    expect(screen.getByText(/tidak membaca, mem-parsing, atau mengunggah isi berkas/i)).toBeVisible();
-    expect(screen.queryByText("PRIVATE_CONTENT_MUST_NOT_APPEAR")).not.toBeInTheDocument();
-    expect(readText).not.toHaveBeenCalled();
-    expect(readBuffer).not.toHaveBeenCalled();
-    expect(screen.getByText("Data Demo")).toBeVisible();
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ImportWorkspace } from "../../src/features/import/ImportWorkspace";
+import { units, id, base, mapping, FakeWorker } from "../fixtures/import-ui";
+const network = vi.hoisted(() => ({ fetch: vi.fn(), upload: vi.fn() }));
+vi.mock("../../src/lib/supabase/browser", () => ({ createBrowserSupabaseClient: () => ({ storage: { from: () => ({ uploadToSignedUrl: network.upload }) } }) }));
+beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker); vi.stubGlobal("fetch", network.fetch); network.fetch.mockReset(); network.upload.mockReset().mockResolvedValue({ error: null }); });
+function selectFile(file = new File(["synthetic"], "snapshot.xlsx")) { fireEvent.change(screen.getByLabelText("Berkas snapshot XLSX"), { target: { files: [file] } }); }
+describe("persistent asset import", () => {
+  it("selects assigned units, exposes template, validates XLSX/50 MiB before Worker work", () => {
+    render(<ImportWorkspace initialDrafts={[]} actorUnits={units} />);
+    expect(screen.getByLabelText("Unit Induk").querySelectorAll("option")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: /Unduh template/ })).toHaveAttribute("href", "/api/templates/asset-snapshot/");
+    selectFile(new File(["bad"], "bad.csv")); expect(screen.getByRole("alert")).toHaveTextContent(".xlsx");
+    const large = new File(["large"], "large.xlsx"); Object.defineProperty(large, "size", { value: 50 * 1024 * 1024 + 1 }); selectFile(large);
+    expect(screen.getByRole("alert")).toHaveTextContent("50 MiB"); expect(FakeWorker.instances).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /demo/i })).not.toBeInTheDocument();
   });
-
-  it("runs the four stages using synthetic validation and resets the workspace", () => {
-    render(<WorkspaceLayout><ImportPage /></WorkspaceLayout>);
-    const stages = screen.getByRole("list", { name: "Tahapan impor" });
-    for (const name of ["Unggah", "Mapping", "Validasi", "Siap"]) expect(within(stages).getByText(name)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Lanjut ke Mapping" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Gunakan sumber demo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Lanjut ke Mapping" }));
-    expect(screen.getByLabelText("Kolom spesifikasi demo")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Lanjut ke Validasi" }));
-    expect(screen.getByRole("table", { name: "Kualitas data sintetis" })).toHaveTextContent("Usia aset kosong");
-    fireEvent.click(screen.getByRole("button", { name: "Lanjut ke Siap" }));
-    expect(screen.getByRole("link", { name: "Tinjau pemetaan RFQ" })).toHaveAttribute("href", "/pemetaan-rfq/");
-    fireEvent.click(screen.getByRole("button", { name: "Reset data demo" }));
-    expect(screen.getByRole("button", { name: "Lanjut ke Mapping" })).toBeDisabled();
+  it("previews only in Worker, gates upload on confirmation and terminates replaced Workers", async () => {
+    const { unmount } = render(<ImportWorkspace initialDrafts={[]} actorUnits={units} />);
+    const file = new File(["private"], "snapshot.xlsx"); const read = vi.fn(); Object.defineProperty(file, "arrayBuffer", { value: read }); selectFile(file);
+    await screen.findByText(/120 kandidat/); expect(read).not.toHaveBeenCalled();
+    expect(FakeWorker.instances[0].postMessage).toHaveBeenCalledWith(expect.objectContaining({ file }));
+    expect(screen.getByText(/2 ditolak/)).toBeVisible(); expect(screen.getByText("a".repeat(64))).toBeVisible();
+    expect(screen.getByRole("button", { name: "Unggah dan proses di server" })).toBeDisabled();
+    selectFile(); await waitFor(() => expect(FakeWorker.instances).toHaveLength(2)); expect(FakeWorker.instances[0].terminate).toHaveBeenCalled();
+    unmount(); expect(FakeWorker.instances[1].terminate).toHaveBeenCalled();
+  });
+  it("uploads directly, saves mapping evidence only, processes once and recovers a lost response by GET", async () => {
+    const responses = [{ ...base, stage: "UPLOAD", upload: { path: `unit/${units[0].id}/dataset/${id}/version/${id}/${id}.xlsx`, token: "signed" } }, { ...base, stage: "MAPPING", layout: mapping }, { ...base, stage: "READY_TO_PROCESS", layout: mapping }];
+    network.fetch.mockImplementation(async (_url, options) => { if (responses.length) return Response.json(responses.shift()); if (options.method === "POST") throw new Error("connection lost"); return Response.json({ ...base, stage: "PROCESSING" }); });
+    render(<ImportWorkspace initialDrafts={[]} actorUnits={units} />); selectFile(); await screen.findByText(/120 kandidat/);
+    fireEvent.click(screen.getByLabelText(/Saya mengonfirmasi pemetaan/));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Unggah dan proses di server" })));
+    await screen.findByText("Status server: PROCESSING");
+    expect(network.upload).toHaveBeenCalledWith(expect.any(String), "signed", expect.any(File), expect.objectContaining({ contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const calls = network.fetch.mock.calls; expect(calls.filter(([url, options]) => url.endsWith("/process/") && options.method === "POST")).toHaveLength(1);
+    expect(calls.at(-1)?.[1]).toMatchObject({ method: "GET", cache: "no-store" });
+    const body = JSON.parse(calls.find(([url]) => url.endsWith("/mapping/"))![1].body); expect(body).toMatchObject({ mapping, canonicalHash: "c".repeat(64) }); expect(body).not.toHaveProperty("preview");
+  });
+  it("lists persisted file/time/stage/counts and resumes quality without local parsing", async () => {
+    network.fetch.mockResolvedValue(Response.json({ ...base, stage: "READY_TO_SUBMIT", summary: { rowCount: 5, blockingErrors: 0, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: {}, totalNilaiABC: 0 } }));
+    render(<ImportWorkspace actorUnits={units} initialDrafts={[{ ...base, unitId: units[0].id, fileName: "stored.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "READY_TO_SUBMIT", rowCount: 5 }]} />);
+    expect(screen.getByText("stored.xlsx")).toBeVisible(); expect(screen.getByText(/5 baris/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Lanjutkan stored.xlsx/ })); await screen.findByRole("heading", { name: /Kualitas/ }); expect(FakeWorker.instances).toHaveLength(0);
+  });
+  it("replaces local-preview status with server status on resume and clears old authority if another draft fails to load", async () => {
+    const summary = { rowCount: 5, blockingErrors: 0, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: {}, totalNilaiABC: 0 };
+    network.fetch.mockResolvedValueOnce(Response.json({ ...base, stage: "READY_TO_SUBMIT", summary })).mockRejectedValueOnce(new Error("offline"));
+    const draft = { ...base, unitId: units[0].id, fileName: "first.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "READY_TO_SUBMIT" as const, rowCount: 5 };
+    render(<ImportWorkspace actorUnits={units} initialDrafts={[draft, { ...draft, importId: "20000000-0000-4000-8000-000000000002", fileName: "second.xlsx" }]} />);
+    selectFile(); await screen.findByText(/Preview lokal siap/);
+    fireEvent.click(screen.getByRole("button", { name: "Lanjutkan first.xlsx" })); await screen.findByRole("heading", { name: /Kualitas/ });
+    expect(screen.queryByText(/Preview lokal siap/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Lanjutkan second.xlsx" })); await screen.findByRole("alert");
+    expect(screen.queryByText("Status server: READY_TO_SUBMIT")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Tinjau perbandingan" })).not.toBeInTheDocument();
+  });
+  it("returns a blocked persisted draft to mapping correction without starting another run", async () => {
+    network.fetch.mockResolvedValue(Response.json({ ...base, stage: "NEEDS_FIX", layout: mapping, summary: { rowCount: 5, blockingErrors: 1, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: { FORMULA_ERROR: 1 }, totalNilaiABC: 0 } }));
+    render(<ImportWorkspace actorUnits={units} initialDrafts={[{ ...base, unitId: units[0].id, fileName: "fix.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "NEEDS_FIX", rowCount: 5 }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Lanjutkan fix.xlsx" })); await screen.findByRole("heading", { name: /Kualitas/ });
+    expect(screen.getByRole("button", { name: "Tinjau perbandingan" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Perbaiki pemetaan" }));
+    expect(screen.getByLabelText("Berkas snapshot XLSX")).toBeVisible(); expect(screen.getByLabelText("UPT (wajib)")).toBeVisible();
+    expect(network.fetch).toHaveBeenCalledTimes(1); expect(network.upload).not.toHaveBeenCalled();
+  });
+  it("deliberately verifies an upload whose response was lost without re-uploading or starting a run", async () => {
+    const upload = { path: `unit/${units[0].id}/dataset/${id}/version/${id}/${id}.xlsx`, token: "signed" };
+    network.fetch.mockResolvedValueOnce(Response.json({ ...base, stage: "UPLOAD", upload })).mockResolvedValueOnce(Response.json({ ...base, stage: "MAPPING", layout: mapping }));
+    render(<ImportWorkspace actorUnits={units} initialDrafts={[{ ...base, unitId: units[0].id, fileName: "uploaded.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "UPLOAD", rowCount: null }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Lanjutkan uploaded.xlsx" })); await screen.findByText("Status server: UPLOAD");
+    fireEvent.click(screen.getByRole("button", { name: "Verifikasi unggahan tersimpan" })); await screen.findByText("Status server: MAPPING");
+    expect(network.fetch.mock.calls.map(([url]) => url)).toEqual([`/api/imports/${id}/`, `/api/imports/${id}/upload-complete/`]);
+    expect(network.upload).not.toHaveBeenCalled(); expect(FakeWorker.instances).toHaveLength(0);
   });
 });

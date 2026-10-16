@@ -56,6 +56,7 @@ describe("authoritative workbook processing", () => {
   it("compares active rows only after finalization and retains the active pointer on submit", async () => {
     const f = await prepared(); await processStoredWorkbook(actor, f.created.importId, f.deps);
     f.tables.datasets[0].active_version_id = f.created.versionId; f.tables.dataset_versions[0].status = "ACTIVE";
+    expect((await loadAssetImport(actor, f.created.importId, f.deps)).comparison).toMatchObject({ hasActiveVersion: false, counts: { ADDED: 1 } });
     const next = await createAssetImport(actor, f.input, f.deps); f.objects.set(next.upload!.path, f.bytes);
     await completeSourceUpload(actor, { importId: next.importId }, f.deps);
     const parsed = await readAssetWorkbook(f.bytes, { ruleVersion: "synthetic-v1" });
