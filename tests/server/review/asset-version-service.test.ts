@@ -1,0 +1,39 @@
+// @vitest-environment node
+import { expect, it, vi } from "vitest";
+import { assertReviewer, approveAndActivateAssetVersion, returnAssetVersion, trashAssetVersion, listPendingAssetVersions, loadAssetVersionReview, createReviewDependencies, type ReviewDependencies } from "../../../src/server/review/asset-version-service";
+import { actor } from "../import/fakes";
+vi.mock("server-only", () => ({}));
+const reviewer = { ...actor, role: "RST_REVIEWER" as const };
+const expected = { runId: actor.userId, mappingRevision: actor.userId, layoutHash: "a".repeat(64), baseVersionId: null, comparisonId: null };
+const state = { versionId: actor.userId, status: "PENDING_RST", expected };
+const input = { versionId: actor.userId, expected, notes: "Verified synthetic evidence", confirmed: true as const, promoteMapping: false, mode: "ACTIVATE" as const, rowIds: [], filters: { offset: 0, filter: "ALL" as const } };
+function fixture() { return { read: vi.fn(async () => structuredClone(state)), mutate: vi.fn(async () => ({ versionId: actor.userId, status: "ACTIVE", previousVersionId: null })) } as unknown as ReviewDependencies; }
+it.each(["UNIT_OPERATOR", "VIEWER"] as const)("denies %s before private reads", async role => { const deps = fixture(); await expect(approveAndActivateAssetVersion({ ...actor, role }, input, deps)).rejects.toMatchObject({ status: 403 }); expect(deps.read).not.toHaveBeenCalled(); });
+it.each(["RST_ADMIN", "RST_REVIEWER"] as const)("permits active %s", role => { expect(() => assertReviewer({ ...actor, role })).not.toThrow(); });
+it("rejects disabled identities", () => { expect(() => assertReviewer({ ...reviewer, status: "DISABLED" } as never)).toThrow(); });
+it("passes checked fingerprint and authoritative expected state to one atomic mutation", async () => { const deps = fixture(); await approveAndActivateAssetVersion(reviewer, { ...input, promoteMapping: true }, deps); expect(deps.read).toHaveBeenCalledWith(actor.userId, input.filters); expect(deps.mutate).toHaveBeenCalledTimes(1); expect(deps.mutate).toHaveBeenCalledWith(reviewer.userId, "ACTIVATE", expect.objectContaining({ expected, promoteMapping: true })); });
+it("rejects stale state before RPC", async () => { const deps = fixture(); await expect(approveAndActivateAssetVersion(reviewer, { ...input, expected: { ...expected, runId: "30000000-0000-4000-8000-000000000001" } }, deps)).rejects.toMatchObject({ status: 409 }); expect(deps.mutate).not.toHaveBeenCalled(); });
+it("requires return notes and confirmation", async () => { const deps = fixture(); await expect(returnAssetVersion(reviewer, { ...input, notes: " " }, deps)).rejects.toMatchObject({ status: 422 }); await expect(returnAssetVersion(reviewer, { ...input, confirmed: false } as never, deps)).rejects.toMatchObject({ status: 422 }); });
+it("allows only admin logical trash and denies active versions", async () => { const deps = fixture(); await expect(trashAssetVersion(reviewer, input, deps)).rejects.toMatchObject({ status: 403 }); vi.mocked(deps.read).mockResolvedValue({ ...state, status: "ACTIVE" } as never); await expect(trashAssetVersion({ ...reviewer, role: "RST_ADMIN" }, input, deps)).rejects.toMatchObject({ status: 409 }); expect(deps.mutate).not.toHaveBeenCalled(); });
+it.each(["UNIT_OPERATOR", "VIEWER"] as const)("denies %s queue and historical reads", async role => { const deps = fixture(); await expect(listPendingAssetVersions({ ...actor, role }, {}, deps)).rejects.toMatchObject({ status: 403 }); await expect(loadAssetVersionReview({ ...actor, role }, actor.userId, deps)).rejects.toMatchObject({ status: 403 }); expect(deps.read).not.toHaveBeenCalled(); });
+it.each(["stale comparison", "blocking row error", "unresolved value", "incomplete run", "superseded version"])("maps authoritative DB rejection for %s to conflict without leaking errors", async reason => { const deps = createReviewDependencies({ rpc: async () => ({ data: null, error: { code: "22023", message: reason + " secret credential" } }) } as never); await expect(deps.mutate(reviewer.userId, "ACTIVATE", input)).rejects.toMatchObject({ status: 409, code: "STALE_OR_BLOCKED_REVIEW", message: "STALE_OR_BLOCKED_REVIEW" }); });
+it("pushes queue filters into the SQL RPC and bounds detail/evidence reads before returning source provenance", async () => {
+  const calls: { table: string; method: string; args: unknown[] }[] = [];
+  const records: Record<string, unknown> = {
+    dataset_versions: { id: actor.userId, version_number: 2, status: "PENDING_RST", created_at: "2026-10-16T00:00:00Z", dataset_id: actor.userId, datasets: { unit_induk_id: actor.userId, type: "ASSET", unit_induk: { name: "Synthetic" } }, import_sessions: [{ id: actor.userId, source_file_id: actor.userId, current_run_id: actor.userId, mapping_revision: actor.userId }] },
+    asset_import_runs: { id: actor.userId, rule_version: "test", status: "COMPLETE", expected_row_count: 200 },
+    asset_import_run_metadata: { import_run_id: actor.userId, layout_hash: "a".repeat(64), mapping_revision: actor.userId, comparison_base_version_id: null, comparison_id: null, diagnostics: { confirmed: true }, summary: { rowCount: 200 } },
+    source_files: { original_name: "synthetic.xlsx", byte_size: 100, mime_type: "xlsx", sha256: "b".repeat(64) }, import_column_mappings: [], approval_events: [], audit_events: [],
+    asset_snapshot_rows: [{ id: actor.userId, source_row_number: 102, nama_peralatan: "Synthetic", error_codes: [], warning_codes: ["AGE_IMPUTED"], asset_valuations: [{ asset_row_id: actor.userId, value_source: "ESTIMATED_SAME_GI", donor_evidence: { tier: "SAME_GI" }, calculation_evidence: { ageYears: 20 } }] }],
+  };
+  const client = { rpc: vi.fn(async () => ({ data: { versions: [], total: 0, offset: 0 }, error: null })), from(table: string) { const promise = Promise.resolve({ data: records[table], count: table === "asset_snapshot_rows" ? 200 : null, error: null }); const chain = Object.assign(promise, Object.fromEntries(["select", "eq", "order", "range", "limit", "in", "not", "or", "single", "maybeSingle"].map(method => [method, (...args: unknown[]) => { calls.push({ table, method, args }); return chain; }]))); return chain; } };
+  const deps = createReviewDependencies(client as never);
+  await listPendingAssetVersions(reviewer, { unitId: actor.userId, status: "HISTORICAL", issue: "AGE_IMPUTED", filter: "WARNING", source: "ESTIMATED_SAME_GI", offset: 0 }, deps);
+  expect(client.rpc).toHaveBeenCalledWith("list_asset_version_reviews", { p_filters: { unitId: actor.userId, status: "HISTORICAL", issue: "AGE_IMPUTED", filter: "WARNING", source: "ESTIMATED_SAME_GI", offset: 0 } });
+  const detail = await loadAssetVersionReview(reviewer, actor.userId, deps, { offset: 100, filter: "WARNING", issue: "AGE_IMPUTED", source: "ESTIMATED_SAME_GI" });
+  expect(detail).toMatchObject({ totalRows: 200, offset: 100, hasMore: true, fileName: "synthetic.xlsx", expected, source: { sha256: "b".repeat(64) } });
+  expect(calls).toContainEqual({ table: "asset_snapshot_rows", method: "range", args: [100, 199] });
+  expect(calls).toContainEqual({ table: "asset_snapshot_rows", method: "eq", args: ["asset_valuations.value_source", "ESTIMATED_SAME_GI"] });
+  for (const table of ["approval_events", "audit_events"]) expect(calls).toContainEqual({ table, method: "limit", args: [100] });
+  expect(JSON.stringify(detail)).not.toContain("object_path");
+});

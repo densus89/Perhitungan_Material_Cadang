@@ -949,38 +949,64 @@ export type Database = {
       }
       mapping_profiles: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           created_at: string
           created_by: string
           id: string
           layout_hash: string
+          mapping: Json | null
           name: string
           rule_version: string
+          source_version_id: string | null
           unit_induk_id: string
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           created_by: string
           id?: string
           layout_hash: string
+          mapping?: Json | null
           name: string
           rule_version: string
+          source_version_id?: string | null
           unit_induk_id: string
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           created_by?: string
           id?: string
           layout_hash?: string
+          mapping?: Json | null
           name?: string
           rule_version?: string
+          source_version_id?: string | null
           unit_induk_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "mapping_profiles_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "mapping_profiles_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mapping_profiles_source_version_id_fkey"
+            columns: ["source_version_id"]
+            isOneToOne: false
+            referencedRelation: "dataset_versions"
             referencedColumns: ["id"]
           },
           {
@@ -1323,6 +1349,7 @@ export type Database = {
         Args: { p_actor_id: string; p_run_id: string }
         Returns: string
       }
+      list_asset_version_reviews: { Args: { p_filters: Json }; Returns: Json }
       replace_asset_import_mapping: {
         Args: {
           p_actor_id: string
@@ -1349,6 +1376,19 @@ export type Database = {
       return_asset_version: {
         Args: { p_actor_id: string; p_notes: string; p_version_id: string }
         Returns: string
+      }
+      review_asset_version: {
+        Args: {
+          p_action: string
+          p_actor_id: string
+          p_expected: Json
+          p_filters: Json
+          p_notes: string
+          p_promote_mapping: boolean
+          p_row_ids: string[]
+          p_version_id: string
+        }
+        Returns: Json
       }
       submit_asset_version: {
         Args: {

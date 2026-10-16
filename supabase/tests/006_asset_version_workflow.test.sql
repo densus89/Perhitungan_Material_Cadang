@@ -8,6 +8,11 @@ create function pg_temp.submit_current(a uuid,v uuid) returns uuid language sql 
  from public.import_sessions s join public.asset_import_runs r on r.id=s.current_run_id
  left join public.asset_import_run_metadata m on m.import_run_id=r.id where s.dataset_version_id=v
 $$;
+create function pg_temp.review_current(a uuid,v uuid,action text,note text) returns uuid language sql as $$
+ select (public.review_asset_version(a,v,action,jsonb_build_object('runId',s.current_run_id,'mappingRevision',s.mapping_revision,'layoutHash',r.mapping_hash,'baseVersionId',m.comparison_base_version_id,'comparisonId',m.comparison_id),note,'{}','{"offset":0,"filter":"ALL"}',false)->>'versionId')::uuid
+ from public.import_sessions s join public.asset_import_runs r on r.id=s.current_run_id
+ join public.asset_import_run_metadata m on m.import_run_id=r.id where s.dataset_version_id=v
+$$;
 
 insert into auth.users(id,email) values ('60000000-0000-4000-8000-000000000001','workflow.operator@pln.co.id'),('60000000-0000-4000-8000-000000000002','workflow.reviewer@pln.co.id');
 update public.profiles set status='ACTIVE' where id::text like '60000000-%';
@@ -87,20 +92,20 @@ reset role;
 select throws_ok($$update public.import_sessions set current_run_id='67000000-0000-4000-8000-000000000002' where id='65000000-0000-4000-8000-000000000001'$$,'22023',null,'Pending pointer status guard also protects owner-level writes');
 set local role service_role;
 select throws_ok($$insert into public.asset_import_runs(id,import_session_id,unit_induk_id,dataset_version_id,created_by,expected_row_count,expected_valuation_count,source_hash,mapping_hash,rule_version,expected_rows_hash,expected_valuations_hash) select '67000000-0000-4000-8000-000000000004',import_session_id,unit_induk_id,dataset_version_id,created_by,expected_row_count,expected_valuation_count,source_hash,mapping_hash,rule_version,expected_rows_hash,expected_valuations_hash from public.asset_import_runs where id='67000000-0000-4000-8000-000000000003'$$,'22023',null,'A processing run cannot be created after submission');
-select throws_ok($$select public.activate_asset_version('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','Approve')$$,'22023',null,'Review-required estimates cannot activate unapproved');
+select throws_ok($$select pg_temp.review_current('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','ACTIVATE','Approve')$$,'22023',null,'Review-required estimates cannot activate unapproved');
 select throws_ok($$update public.asset_valuations set approved_by='60000000-0000-4000-8000-000000000001',approved_at=now(),approval_notes='Forged' where asset_row_id='68000000-0000-4000-8000-000000000003'$$,'42501',null,'Unit operator cannot supply valuation approval identity');
 select lives_ok($$update public.asset_valuations set approved_by='60000000-0000-4000-8000-000000000002',approved_at=now(),approval_notes='Evidence reviewed' where asset_row_id='68000000-0000-4000-8000-000000000003'$$,'RST can append approval evidence to frozen valuation');
 select throws_ok($$update public.asset_valuations set approval_notes='Rewritten' where asset_row_id='68000000-0000-4000-8000-000000000003'$$,'22023',null,'Valuation approval cannot be rewritten');
 select is((select finalized_valuations_hash from public.asset_import_runs where id='67000000-0000-4000-8000-000000000003'),(select valuations_hash from private.asset_run_hashes('67000000-0000-4000-8000-000000000003')),'Appending approval does not change calculation hash');
-select lives_ok($$select public.return_asset_version('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','Please verify')$$);
+select lives_ok($$select pg_temp.review_current('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','RETURN','Please verify')$$);
 select is((select status::text from public.dataset_versions where id='63000000-0000-4000-8000-000000000002'),'NEEDS_FIX','Reviewer returns with notes');
 select lives_ok($$select pg_temp.submit_current('60000000-0000-4000-8000-000000000001','63000000-0000-4000-8000-000000000002')$$);
 reset role;
 
-create function pg_temp.fail_asset_audit() returns trigger language plpgsql as $$begin if new.action='ASSET_VERSION_ACTIVATED' then raise exception 'synthetic audit failure'; end if; return new; end;$$;
+create function pg_temp.fail_asset_audit() returns trigger language plpgsql as $$begin if new.action='ASSET_VERSION_ACTIVATE' then raise exception 'synthetic audit failure'; end if; return new; end;$$;
 create trigger synthetic_asset_audit_failure before insert on public.audit_events for each row execute function pg_temp.fail_asset_audit();
 set local role service_role;
-select throws_ok($$select public.activate_asset_version('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','Approved')$$,'P0001',null,'Audit failure rolls back activation transaction');
+select throws_ok($$select pg_temp.review_current('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','ACTIVATE','Approved')$$,'P0001',null,'Audit failure rolls back activation transaction');
 select is((select active_version_id from public.datasets where id='62000000-0000-4000-8000-000000000001'),'63000000-0000-4000-8000-000000000001'::uuid,'Pointer unchanged after rollback');
 select is((select status::text from public.dataset_versions where id='63000000-0000-4000-8000-000000000001'),'ACTIVE','Previous status rolls back');
 select is((select status::text from public.dataset_versions where id='63000000-0000-4000-8000-000000000002'),'PENDING_RST','Candidate status rolls back');
@@ -108,7 +113,7 @@ select is((select count(*) from public.approval_events where dataset_version_id=
 reset role;
 drop trigger synthetic_asset_audit_failure on public.audit_events;
 set local role service_role;
-select lives_ok($$select public.activate_asset_version('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','Approved')$$);
+select lives_ok($$select pg_temp.review_current('60000000-0000-4000-8000-000000000002','63000000-0000-4000-8000-000000000002','ACTIVATE','Approved')$$);
 select is((select active_version_id from public.datasets where id='62000000-0000-4000-8000-000000000001'),'63000000-0000-4000-8000-000000000002'::uuid,'Dataset pointer switches atomically');
 select is((select status::text from public.dataset_versions where id='63000000-0000-4000-8000-000000000001'),'HISTORICAL','Previous active is historical');
 select is((select status::text from public.dataset_versions where id='63000000-0000-4000-8000-000000000002'),'ACTIVE','Candidate is active');
@@ -116,8 +121,8 @@ select throws_ok($$update public.import_sessions set current_run_id='67000000-00
 select throws_ok($$truncate public.asset_valuations$$,'42501',null,'Service cannot truncate active valuations');
 select throws_ok($$truncate public.asset_snapshot_rows cascade$$,'42501',null,'Service cannot cascade truncate active snapshot rows');
 select is((select count(*) from public.approval_events where dataset_version_id='63000000-0000-4000-8000-000000000002' and action='ACTIVATED'),1::bigint,'Activation approval appended once');
-select is((select count(*) from public.audit_events where target_id='63000000-0000-4000-8000-000000000002' and action='ASSET_VERSION_ACTIVATED'),1::bigint,'Activation audited once');
-select is((select count(*) from public.approval_events where dataset_version_id='63000000-0000-4000-8000-000000000002' and action='APPROVED'),1::bigint,'Valuation approval appends an immutable event');
+select is((select count(*) from public.audit_events where target_id='63000000-0000-4000-8000-000000000002' and action='ASSET_VERSION_ACTIVATE'),1::bigint,'Activation audited once');
+select is((select count(*) from public.approval_events where dataset_version_id='63000000-0000-4000-8000-000000000002' and action='APPROVED'),2::bigint,'Valuation approval and version approval each append an immutable event');
 select throws_ok($$update public.approval_events set notes='rewrite' where dataset_version_id='63000000-0000-4000-8000-000000000002'$$,'42501',null,'Even service cannot rewrite approval events');
 select throws_ok($$delete from public.audit_events where target_id='63000000-0000-4000-8000-000000000002'$$,'42501',null,'Even service cannot delete audit events');
 select throws_ok($$truncate public.audit_events$$,'42501',null,'Service cannot bypass audit immutability with TRUNCATE');

@@ -41,6 +41,8 @@ function clickClientLink(link: HTMLElement) {
 }
 
 describe("workspace client navigation", () => {
+  it.each(["RST_ADMIN", "RST_REVIEWER"] as const)("shows Review Snapshot to %s", role => { render(<PathnameContext.Provider value="/review-snapshot/"><AuthenticatedWorkspace actor={{ ...workspaceActor, role }}><p>Review</p></AuthenticatedWorkspace></PathnameContext.Provider>); expect(screen.getByRole("link", { name: "Review Snapshot" })).toHaveAttribute("href", "/review-snapshot/"); expect(screen.getByText("Tinjauan snapshot aset")).toBeVisible(); });
+  it("hides RST review from operators", () => { render(<ClientNavigationWorkspace />); expect(screen.queryByRole("link", { name: "Review Snapshot" })).not.toBeInTheDocument(); });
   it.each(["Setujui", "Tolak"])("refreshes dashboard counts after a %s round trip and clears pending status at zero", (decision) => {
     render(<ClientNavigationWorkspace initialPath="/ringkasan/" />);
     expect(within(screen.getByRole("main")).getByRole("status")).toHaveTextContent("3 pemetaan RFQ menunggu approval");

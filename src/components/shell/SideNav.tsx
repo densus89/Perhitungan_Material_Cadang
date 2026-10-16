@@ -40,11 +40,12 @@ export function SideNav() {
           );
         })}
       </nav>
+      {["RST_ADMIN", "RST_REVIEWER"].includes(actor.role) && <section className={styles.administration}><p className="nav-section-label">TINJAUAN DIV RST</p><nav aria-label="Tinjauan DIV RST"><Link href="/review-snapshot/" aria-current={currentPath === "/review-snapshot" ? "page" : undefined}><ClipboardCheck size={18} aria-hidden="true" /><span>Review Snapshot</span></Link></nav></section>}
       {actor.role === "RST_ADMIN" && <section className={styles.administration}>
         <p className="nav-section-label">ADMINISTRASI</p>
         <nav aria-label="Administrasi"><Link href="/admin/pengguna/" aria-current={currentPath === "/admin/pengguna" ? "page" : undefined}><Users size={18} aria-hidden="true" /><span>Kelola Pengguna</span></Link></nav>
       </section>}
-      <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div>{currentPath === "/impor" ? <><strong>Snapshot aset unit</strong><p>Draft tersimpan dan persetujuan DIV RST.</p></> : planningContext ? <><strong>Perencanaan Data Demo</strong><p>Modul perencanaan memakai data sintetis.</p></> : <><strong>Administrasi Pengguna</strong><p>Kelola akses dan penugasan pengguna.</p></>}</div></div>
+      <div className="sidebar-footer"><ClipboardCheck size={18} aria-hidden="true" /><div>{currentPath === "/review-snapshot" ? <><strong>Tinjauan snapshot aset</strong><p>Periksa bukti dan tetapkan versi aktif.</p></> : currentPath === "/impor" ? <><strong>Snapshot aset unit</strong><p>Draft tersimpan dan persetujuan DIV RST.</p></> : planningContext ? <><strong>Perencanaan Data Demo</strong><p>Modul perencanaan memakai data sintetis.</p></> : <><strong>Administrasi Pengguna</strong><p>Kelola akses dan penugasan pengguna.</p></>}</div></div>
     </aside>
   );
 }
