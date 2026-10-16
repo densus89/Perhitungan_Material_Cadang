@@ -96,12 +96,8 @@ export async function saveImportMapping(actor: Actor, input: z.infer<typeof save
   catch (error) { if (error instanceof ImportError) throw error; throw new ImportError("INVALID_INPUT", 422); }
   if (parsed.layoutHash !== input.layoutHash || parsed.canonicalHash !== input.canonicalHash) throw new ImportError("PREVIEW_MISMATCH");
   const mapping = parsed.layout.selected!;
-  // Clear selection first so a failed/incomplete mapping cannot be processed.
-  await deps.update("import_sheets", { import_session_id: session.id }, { selected: false });
-  await deps.remove("import_column_mappings", { import_session_id: session.id });
-  const columns = mapping.columns.map((column) => ({ import_sheet_id: sheet.id, import_session_id: session.id, unit_induk_id: session.unit_induk_id, source_column_index: column.columnIndex, source_header: column.header, canonical_field: column.field, confidence: column.confidence, confirmed_by: actor.userId, confirmed_at: deps.now() }));
-  for (let index = 0; index < columns.length; index += 1000) await deps.insert("import_column_mappings", columns.slice(index, index + 1000));
-  await deps.update("import_sheets", { id: sheet.id, import_session_id: session.id }, { selected: true, header_row: mapping.headerRow, layout_hash: input.layoutHash, diagnostics: asJson({ uploadVerified: source.sha256, mapping, layoutHash: input.layoutHash, canonicalHash: input.canonicalHash, ruleVersion: input.ruleVersion, headerFingerprint: headerFingerprint(mapping) }) });
+  try { await deps.replaceMapping(actor.userId, { importId: session.id, sheetId: sheet.id, expectedRevision: session.mapping_revision, mapping, layoutHash: input.layoutHash, canonicalHash: input.canonicalHash, ruleVersion: input.ruleVersion, sourceHash: source.sha256 }); }
+  catch { throw new ImportError("CONFLICT"); }
   return loadAssetImport(actor, session.id, deps);
 }
 export async function loadAssetImport(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {
@@ -111,7 +107,8 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
   const current = runs.find((run) => run.id === session.current_run_id), latest = [...runs].reverse().sort((a, b) => b.created_at.localeCompare(a.created_at)).at(0);
   const diagnostics = selected?.diagnostics as Record<string, Json> | undefined;
   let stage: ImportResponse["stage"] = !sheets.length ? "UPLOAD" : selected ? "READY_TO_PROCESS" : "MAPPING";
-  const currentMatches = current?.status === "COMPLETE" && current.mapping_hash === selected?.layout_hash && current.rule_version === diagnostics?.ruleVersion;
+  const metadata = current ? (await deps.list("asset_import_run_metadata", { import_run_id: current.id, unit_induk_id: session.unit_induk_id }))[0] : undefined;
+  const currentMatches = current?.status === "COMPLETE" && current.mapping_revision === session.mapping_revision && current.mapping_hash === selected?.layout_hash && current.rule_version === diagnostics?.ruleVersion;
   if (currentMatches) stage = "READY_TO_SUBMIT";
   if (latest?.status === "FAILED") stage = "FAILED";
   if (runs.some((run) => run.status === "PROCESSING")) stage = "PROCESSING";
@@ -128,8 +125,8 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
       if (creator && roles.length === 1 && ["RST_ADMIN", "RST_REVIEWER"].includes(roles[0].role)) { result.suggestedProfile = { id: profile.id, name: profile.name, ruleVersion: profile.rule_version }; break; }
     }
   }
-  const summary = importSummarySchema.safeParse(diagnostics?.summary); if (summary.success && currentMatches && diagnostics?.summaryRunId === current.id) { result.summary = summary.data; if (summary.data.blockingErrors && stage === "READY_TO_SUBMIT") result.stage = "NEEDS_FIX"; }
-  if (currentMatches && diagnostics?.summaryRunId === current.id && diagnostics.comparisonReady === false && stage === "READY_TO_SUBMIT") { result.stage = "FAILED"; result.failureCode = "COMPARISON_FAILED"; }
+  const summary = importSummarySchema.safeParse(metadata?.summary); if (summary.success && currentMatches) { result.summary = summary.data; if (summary.data.blockingErrors && stage === "READY_TO_SUBMIT") result.stage = "NEEDS_FIX"; }
+  if (currentMatches && !metadata?.comparison_ready && stage === "READY_TO_SUBMIT") { result.stage = "FAILED"; result.failureCode = "COMPARISON_FAILED"; }
   if (latest?.status === "FAILED") result.failureCode = "PROCESS_FAILED";
   return result;
 }
@@ -141,8 +138,8 @@ export async function submitAssetVersion(actor: Actor, importId: string, deps: I
   const selected = (await deps.list("import_sheets", { import_session_id: session.id, selected: true }))[0];
   if (!selected || selected.layout_hash !== current.mapping_hash || (selected.diagnostics as Record<string, Json>)?.ruleVersion !== current.rule_version) throw new ImportError("NOT_READY");
   await confirmedMapping(selected, deps);
-  const completion = z.object({ summaryRunId: z.uuid(), comparisonReady: z.literal(true) }).safeParse(selected.diagnostics);
-  if (!completion.success || completion.data.summaryRunId !== current.id) throw new ImportError("NOT_READY");
+  const completion = (await deps.list("asset_import_run_metadata", { import_run_id: current.id, unit_induk_id: session.unit_induk_id }))[0];
+  if (!completion?.comparison_ready) throw new ImportError("NOT_READY");
   if (dataset.active_version_id && dataset.active_version_id !== version.id) {
     const comparison = (await deps.list("version_comparisons", { dataset_id: dataset.id, unit_induk_id: session.unit_induk_id, from_version_id: dataset.active_version_id, to_run_id: current.id }))[0];
     if (!comparison) throw new ImportError("NOT_READY");
@@ -152,7 +149,7 @@ export async function submitAssetVersion(actor: Actor, importId: string, deps: I
   }
   const rows = await deps.list("asset_snapshot_rows", { import_run_id: current.id }), values = await deps.list("asset_valuations", { import_run_id: current.id });
   if (rows.length !== current.expected_row_count || values.length !== current.expected_valuation_count || rows.some((row) => row.error_codes.length) || values.some((value) => value.nilai_abc === null || value.value_source === "UNRESOLVED")) throw new ImportError("NOT_READY");
-  try { await deps.submit(actor.userId, version.id); } catch { throw new ImportError("NOT_READY"); }
+  try { await deps.submit(actor.userId, version.id, { runId: current.id, mappingRevision: session.mapping_revision, layoutHash: current.mapping_hash, baseVersionId: completion.comparison_base_version_id, comparisonId: completion.comparison_id }); } catch { throw new ImportError("NOT_READY"); }
   return loadAssetImport(actor, importId, deps);
 }
 

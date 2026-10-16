@@ -79,9 +79,10 @@ async function referenceContext(deps: ImportDependencies, ruleVersion: string, a
 async function persistComparison(actor: Actor, session: Row<"import_sessions">, runId: string, rows: Row<"asset_snapshot_rows">[], values: Row<"asset_valuations">[], deps: ImportDependencies) {
   // Only read active comparison input after successful finalization.
   const dataset = (await deps.list("datasets", { id: session.dataset_id, unit_induk_id: session.unit_induk_id }))[0];
-  if (!dataset?.active_version_id || dataset.active_version_id === session.dataset_version_id) return;
+  if (!dataset?.active_version_id) return { baseVersionId: null, comparisonId: null };
+  if (dataset.active_version_id === session.dataset_version_id) throw new ImportError("COMPARISON_FAILED");
   const previousSession = (await deps.list("import_sessions", { dataset_version_id: dataset.active_version_id, unit_induk_id: session.unit_induk_id }))[0];
-  if (!previousSession?.current_run_id) return;
+  if (!previousSession?.current_run_id) throw new ImportError("COMPARISON_FAILED");
   const previousRun = (await deps.list("asset_import_runs", { id: previousSession.current_run_id, status: "COMPLETE" }))[0];
   if (!previousRun) throw new ImportError("COMPARISON_FAILED");
   const before = await deps.list("asset_snapshot_rows", { import_run_id: previousRun.id, unit_induk_id: session.unit_induk_id });
@@ -101,6 +102,7 @@ async function persistComparison(actor: Actor, session: Row<"import_sessions">, 
   });
   await deps.insert("version_comparisons", [{ id: comparisonId, dataset_id: session.dataset_id, unit_induk_id: session.unit_induk_id, from_version_id: dataset.active_version_id, to_version_id: session.dataset_version_id, from_run_id: previousRun.id, to_run_id: runId, summary: asJson({ counts: kinds, before: summarize(before, beforeValues), after: summarize(rows, values) }), created_by: actor.userId }]);
   for (let offset = 0; offset < changes.length; offset += 1000) await deps.insert("asset_version_changes", changes.slice(offset, offset + 1000));
+  return { baseVersionId: dataset.active_version_id, comparisonId };
 }
 export async function processStoredWorkbook(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {
   const { session, source, version } = await ownedImport(actor, importId, deps); assertEditable(version);
@@ -143,8 +145,10 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
     values.push({ asset_row_id: persisted.id, import_run_id: runId, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, nilai_abc: valuation.nilaiABC, harga_pengadaan_saat_ini: valuation.hargaPengadaanSaatIni, value_source: valuation.valueSource, calculation_method: valuation.calculationMethod, age_status: valuation.ageStatus, age_years: valuation.evidence.ageYears, useful_life_years: valuation.usefulLife.years, useful_life_rule_id: valuation.usefulLife.rule?.id ?? null, rule_version: diagnostics.data.ruleVersion, as_of: asOf, manual_approval_required: validation.manualApprovalRequired, approved_by: null, approved_at: null, approval_notes: null, selected_donor_ids: valuation.evidence.comparables?.selectedDonorIds ?? [], donor_evidence: asJson({ ...(valuation.evidence.comparables ?? {}), coordinateVersions: references.coordinateVersions }), calculation_evidence: asJson(valuation.evidence), warning_codes: persisted.warning_codes, created_at: deps.now() });
   });
   const expected = persistedRecordHashes(rows, values);
+  // Atomic reservation rechecks revision and uniqueness after parsing/valuation.
+  try { await deps.reserve(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: { id: runId, expected_row_count: rows.length, expected_valuation_count: values.length, source_hash: source.sha256, mapping_hash: parsed.layoutHash, rule_version: diagnostics.data.ruleVersion, expected_rows_hash: expected.rowsHash, expected_valuations_hash: expected.valuationsHash } }); }
+  catch { throw new ImportError("CONFLICT"); }
   try {
-    await deps.insert("asset_import_runs", [{ id: runId, import_session_id: session.id, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, expected_row_count: rows.length, expected_valuation_count: values.length, source_hash: source.sha256, mapping_hash: parsed.layoutHash, rule_version: diagnostics.data.ruleVersion, expected_rows_hash: expected.rowsHash, expected_valuations_hash: expected.valuationsHash, created_by: actor.userId, status: "PROCESSING" }]);
     for (let offset = 0; offset < rows.length; offset += 1000) {
       await deps.insert("asset_snapshot_rows", rows.slice(offset, offset + 1000));
       await deps.insert("asset_valuations", values.slice(offset, offset + 1000));
@@ -155,14 +159,12 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
     await deps.finalize(actor.userId, runId);
   } catch {
     // Conditional update cannot rewrite a terminal run if finalization won a race.
-    await deps.update("asset_import_runs", { id: runId, status: "PROCESSING" }, { status: "FAILED", failure_code: "PROCESS_FAILED" });
+    await deps.failRun(actor.userId, runId);
     throw new ImportError("PROCESS_FAILED");
   }
   try {
-    const completedDiagnostics = { ...diagnostics.data, mapping, summary: summarize(rows, values), summaryRunId: runId };
-    await deps.update("import_sheets", { id: sheet.id }, { diagnostics: asJson({ ...completedDiagnostics, comparisonReady: false }) });
-    await persistComparison(actor, session, runId, rows, values, deps);
-    await deps.update("import_sheets", { id: sheet.id }, { diagnostics: asJson({ ...completedDiagnostics, comparisonReady: true }) });
+    const comparison = await persistComparison(actor, session, runId, rows, values, deps);
+    await deps.sealComparison(actor.userId, runId, comparison.baseVersionId, comparison.comparisonId);
   } catch { throw new ImportError("COMPARISON_FAILED"); }
   return loadAssetImport(actor, importId, deps);
 }

@@ -1,3 +1,5 @@
+// Generated from the linked public schema. Four GI GENERATED ALWAYS Insert/Update
+// keys are narrowed to never to match PostgreSQL; readable Row fields are unchanged.
 export type Json =
   | string
   | number
@@ -107,6 +109,90 @@ export type Database = {
           },
         ]
       }
+      asset_import_run_metadata: {
+        Row: {
+          comparison_base_version_id: string | null
+          comparison_id: string | null
+          comparison_ready: boolean
+          created_at: string
+          dataset_version_id: string
+          diagnostics: Json
+          import_run_id: string
+          import_session_id: string
+          import_sheet_id: string
+          layout_hash: string
+          mapping_revision: string
+          summary: Json
+          unit_induk_id: string
+        }
+        Insert: {
+          comparison_base_version_id?: string | null
+          comparison_id?: string | null
+          comparison_ready?: boolean
+          created_at?: string
+          dataset_version_id: string
+          diagnostics: Json
+          import_run_id: string
+          import_session_id: string
+          import_sheet_id: string
+          layout_hash: string
+          mapping_revision: string
+          summary: Json
+          unit_induk_id: string
+        }
+        Update: {
+          comparison_base_version_id?: string | null
+          comparison_id?: string | null
+          comparison_ready?: boolean
+          created_at?: string
+          dataset_version_id?: string
+          diagnostics?: Json
+          import_run_id?: string
+          import_session_id?: string
+          import_sheet_id?: string
+          layout_hash?: string
+          mapping_revision?: string
+          summary?: Json
+          unit_induk_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_import_run_metadata_comparison_base_version_id_fkey"
+            columns: ["comparison_base_version_id"]
+            isOneToOne: false
+            referencedRelation: "dataset_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_import_run_metadata_comparison_id_unit_induk_id_fkey"
+            columns: ["comparison_id", "unit_induk_id"]
+            isOneToOne: false
+            referencedRelation: "version_comparisons"
+            referencedColumns: ["id", "unit_induk_id"]
+          },
+          {
+            foreignKeyName: "asset_import_run_metadata_import_run_id_import_session_id__fkey"
+            columns: ["import_run_id", "import_session_id", "unit_induk_id"]
+            isOneToOne: false
+            referencedRelation: "asset_import_runs"
+            referencedColumns: ["id", "import_session_id", "unit_induk_id"]
+          },
+          {
+            foreignKeyName: "asset_import_run_metadata_import_run_id_unit_induk_id_data_fkey"
+            columns: ["import_run_id", "unit_induk_id", "dataset_version_id"]
+            isOneToOne: false
+            referencedRelation: "asset_import_runs"
+            referencedColumns: ["id", "unit_induk_id", "dataset_version_id"]
+          },
+          {
+            foreignKeyName: "asset_import_run_metadata_import_sheet_id_import_session_i_fkey"
+            columns: ["import_sheet_id", "import_session_id", "unit_induk_id"]
+            isOneToOne: false
+            referencedRelation: "import_sheets"
+            referencedColumns: ["id", "import_session_id", "unit_induk_id"]
+          },
+        ]
+      }
       asset_import_runs: {
         Row: {
           completed_at: string | null
@@ -123,6 +209,7 @@ export type Database = {
           id: string
           import_session_id: string
           mapping_hash: string
+          mapping_revision: string | null
           rule_version: string
           source_hash: string
           status: Database["public"]["Enums"]["asset_import_run_status"]
@@ -143,6 +230,7 @@ export type Database = {
           id?: string
           import_session_id: string
           mapping_hash: string
+          mapping_revision?: string | null
           rule_version: string
           source_hash: string
           status?: Database["public"]["Enums"]["asset_import_run_status"]
@@ -163,6 +251,7 @@ export type Database = {
           id?: string
           import_session_id?: string
           mapping_hash?: string
+          mapping_revision?: string | null
           rule_version?: string
           source_hash?: string
           status?: Database["public"]["Enums"]["asset_import_run_status"]
@@ -609,8 +698,6 @@ export type Database = {
           },
         ]
       }
-      // Typegen 2.120.0 emits writable strings for these stored GENERATED ALWAYS
-      // keys. Insert/Update narrow them to never to match PostgreSQL; Row is unchanged.
       gi_location_references: {
         Row: {
           created_at: string
@@ -749,6 +836,7 @@ export type Database = {
           dataset_id: string
           dataset_version_id: string
           id: string
+          mapping_revision: string
           source_file_id: string
           unit_induk_id: string
           updated_at: string
@@ -760,6 +848,7 @@ export type Database = {
           dataset_id: string
           dataset_version_id: string
           id?: string
+          mapping_revision?: string
           source_file_id: string
           unit_induk_id: string
           updated_at?: string
@@ -771,6 +860,7 @@ export type Database = {
           dataset_id?: string
           dataset_version_id?: string
           id?: string
+          mapping_revision?: string
           source_file_id?: string
           unit_induk_id?: string
           updated_at?: string
@@ -1216,8 +1306,44 @@ export type Database = {
         }
         Returns: string
       }
+      complete_asset_import_comparison: {
+        Args: {
+          p_actor_id: string
+          p_base_version_id: string
+          p_comparison_id: string
+          p_run_id: string
+        }
+        Returns: string
+      }
+      fail_asset_import_run: {
+        Args: { p_actor_id: string; p_run_id: string }
+        Returns: string
+      }
       finalize_asset_import_run: {
         Args: { p_actor_id: string; p_run_id: string }
+        Returns: string
+      }
+      replace_asset_import_mapping: {
+        Args: {
+          p_actor_id: string
+          p_canonical_hash: string
+          p_expected_revision: string
+          p_import_id: string
+          p_layout_hash: string
+          p_mapping: Json
+          p_rule_version: string
+          p_sheet_id: string
+          p_source_hash: string
+        }
+        Returns: string
+      }
+      reserve_asset_import_run: {
+        Args: {
+          p_actor_id: string
+          p_expected_revision: string
+          p_import_id: string
+          p_run: Json
+        }
         Returns: string
       }
       return_asset_version: {
@@ -1225,7 +1351,15 @@ export type Database = {
         Returns: string
       }
       submit_asset_version: {
-        Args: { p_actor_id: string; p_version_id: string }
+        Args: {
+          p_actor_id: string
+          p_expected_base_version_id: string
+          p_expected_comparison_id: string
+          p_expected_layout_hash: string
+          p_expected_mapping_revision: string
+          p_expected_run_id: string
+          p_version_id: string
+        }
         Returns: string
       }
     }
