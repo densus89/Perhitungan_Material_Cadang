@@ -8,6 +8,46 @@ vi.mock("../../src/lib/supabase/browser", () => ({ createBrowserSupabaseClient: 
 beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker); vi.stubGlobal("fetch", network.fetch); network.fetch.mockReset(); network.upload.mockReset().mockResolvedValue({ error: null }); });
 function selectFile(file = new File(["synthetic"], "snapshot.xlsx")) { fireEvent.change(screen.getByLabelText("Berkas snapshot XLSX"), { target: { files: [file] } }); }
 describe("persistent asset import", () => {
+  it.each(["column edit", "sheet switch", "parse error recovery"] as const)("keeps mapping and preview evidence atomic when status refresh cancels a %s", async scenario => {
+    class DeferredWorker extends FakeWorker { postMessage = vi.fn(); }
+    vi.stubGlobal("Worker", DeferredWorker);
+    const original = { ...mapping, columns: [...mapping.columns, { columnIndex: 30, columnLetter: "AD", header: "UPT", normalizedHeader: "upt", field: null, confidence: 1 }] };
+    const alternate = { ...original, sheetName: "ALTERNATE" };
+    const initial = { ...preview, layout: { ...preview.layout, selected: original, candidates: [original, alternate] } };
+    const recovered = { ...initial, layout: { ...initial.layout, selected: alternate }, layoutHash: "d".repeat(64), canonicalHash: "e".repeat(64) };
+    network.fetch.mockImplementation(async (url, options) => {
+      if (options.method === "GET") return Response.json({ ...base, stage: "MAPPING", layout: original });
+      if (url.endsWith("/mapping/")) return Response.json({ ...base, stage: "READY_TO_PROCESS", layout: scenario === "parse error recovery" ? alternate : original });
+      return Response.json({ ...base, stage: "READY_TO_SUBMIT", summary: { rowCount: 5, blockingErrors: 0, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: {}, totalNilaiABC: 0 } });
+    });
+    render(<ImportWorkspace actorUnits={units} initialDrafts={[{ ...base, unitId: units[0].id, fileName: "stored.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "MAPPING", rowCount: null }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Lanjutkan stored.xlsx" })); await screen.findByText("Status server: MAPPING");
+    selectFile(); await act(async () => FakeWorker.instances[0].onmessage?.({ data: initial }));
+    if (scenario === "parse error recovery") {
+      fireEvent.change(screen.getByLabelText("UPT (wajib)"), { target: { value: "30" } });
+      await act(async () => FakeWorker.instances.at(-1)!.onmessage?.({ data: { type: "error", message: "Synthetic parse error" } }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Synthetic parse error");
+      fireEvent.change(screen.getByLabelText("Sheet dan baris header"), { target: { value: "ALTERNATE:1" } });
+      await act(async () => FakeWorker.instances.at(-1)!.onmessage?.({ data: recovered }));
+    }
+    if (scenario === "sheet switch") fireEvent.change(screen.getByLabelText("Sheet dan baris header"), { target: { value: "ALTERNATE:1" } });
+    else fireEvent.change(screen.getByLabelText("UPT (wajib)"), { target: { value: "30" } });
+    const pending = FakeWorker.instances.at(-1)!;
+    const late = pending.onmessage!;
+    expect(screen.getByLabelText(/Saya mengonfirmasi pemetaan/)).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Periksa status" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Periksa status" })).toBeEnabled());
+    const expected = scenario === "parse error recovery" ? recovered : initial;
+    expect(screen.getByLabelText("Sheet dan baris header")).toHaveValue(expected.layout.selected.sheetName + ":1");
+    expect(screen.getByLabelText("UPT (wajib)")).toHaveValue("2");
+    await act(async () => late({ data: { ...recovered, layoutHash: "f".repeat(64), canonicalHash: "0".repeat(64) } }));
+    fireEvent.click(screen.getByLabelText(/Saya mengonfirmasi pemetaan/));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Unggah dan proses di server" })));
+    await screen.findByRole("heading", { name: /Kualitas/ });
+    const payloads = network.fetch.mock.calls.filter(([url]) => url.endsWith("/mapping/")).map(([, options]) => JSON.parse(options.body));
+    expect(payloads).toEqual([{ mapping: expected.layout.selected, ruleVersion: expected.ruleVersion, layoutHash: expected.layoutHash, canonicalHash: expected.canonicalHash }]);
+    expect(network.upload).not.toHaveBeenCalled();
+  });
   it("retains usable sheet and indexed mapping controls after a re-preview error", async () => {
     const alternate = { ...mapping, sheetName: "ALTERNATE" };
     class DeferredWorker extends FakeWorker { postMessage = vi.fn(); }

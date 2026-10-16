@@ -17,7 +17,7 @@ export function ImportWorkspace({ initialDrafts, actorUnits }: { initialDrafts: 
   const locked = flow.busy || Boolean(response && ["PROCESSING", "PENDING_RST", "ACTIVE", "HISTORICAL"].includes(response.stage));
   const mapping = flow.mapping ?? response?.layout;
   const stepIndex = stages.findIndex(stage => stage.key === flow.step);
-  const canUpload = !locked && !flow.reading && Boolean(flow.file && preview && flow.mapping && flow.confirmed);
+  const canUpload = !locked && !flow.reading && flow.previewReady && flow.confirmed;
   return <div className={styles.workspace}>
     <header className="page-heading"><div><p className="eyebrow">PERSIAPAN DATA</p><h1>Impor & kualitas data</h1><p className="page-description">Siapkan snapshot aset, periksa bukti nilai, dan ajukan versi untuk persetujuan DIV RST.</p></div>{response && <button className="button" disabled={flow.busy} onClick={flow.startNew}>Impor snapshot baru</button>}</header>
     <div className="status-banner"><Upload size={18} aria-hidden="true" /><p>Preview lokal → draft divalidasi server → pengajuan DIV RST → versi aktif setelah persetujuan.</p></div>
@@ -29,7 +29,7 @@ export function ImportWorkspace({ initialDrafts, actorUnits }: { initialDrafts: 
     {response && <div className={`panel feature-panel ${styles.status}`}><div><Badge tone={response.stage === "ACTIVE" ? "success" : response.stage === "FAILED" || response.stage === "NEEDS_FIX" ? "warning" : "neutral"}>Status server: {response.stage}</Badge><p className="section-note">Versi: {response.versionId}</p>{response.source && <p>{response.source.fileName}</p>}</div><button className="button" disabled={flow.busy} onClick={() => void flow.refresh()}>Periksa status</button></div>}
     {(flow.step === "source" || flow.step === "mapping") && <>
       <ImportSourceStep units={actorUnits} unitId={flow.unitId} onUnit={flow.setUnitId} onFile={flow.selectFile} file={flow.file} preview={preview} reading={flow.reading} disabled={locked} unitLocked={Boolean(response)} />
-      {mapping && <ImportMappingStep mapping={mapping} candidates={preview?.layout.candidates.length ? preview.layout.candidates : [mapping]} confirmed={flow.confirmed} onChange={flow.changeMapping} onConfirm={flow.setConfirmed} disabled={locked || flow.reading || !preview} />}
+      {mapping && <ImportMappingStep mapping={mapping} candidates={preview?.layout.candidates.length ? preview.layout.candidates : [mapping]} confirmed={flow.confirmed} onChange={flow.changeMapping} onConfirm={flow.setConfirmed} disabled={locked || flow.reading || !flow.previewReady} />}
       <div className="wizard-actions"><button className="button button--primary" disabled={!canUpload} onClick={() => void flow.run()}>Unggah dan proses di server</button></div>
       {response && ["UPLOAD", "MAPPING"].includes(response.stage) && !flow.file && <p className="section-note">Pilih kembali berkas asli untuk melanjutkan. SHA-256 harus sama dengan sumber draft.</p>}
     </>}

@@ -10,6 +10,7 @@ import { createAssetImportClient } from "./import-client";
 export type LocalPreview = Extract<AssetImportWorkerResult, { type: "result" }>;
 export type ImportUnit = { id: string; name: string };
 export type ImportStep = "source" | "mapping" | "quality" | "comparison";
+type PreviewSnapshot = { preview: LocalPreview; mapping: AssetSheetMapping | null; file: File; generation: number };
 function stepFor(response: ImportResponse): ImportStep {
   if (["PENDING_RST", "ACTIVE", "HISTORICAL"].includes(response.stage)) return "comparison";
   if (response.summary) return "quality";
@@ -26,9 +27,9 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   const [drafts, setDrafts] = useState(initialDrafts.filter(draft => actorUnits.some(unit => unit.id === draft.unitId)));
   const [response, setResponse] = useState<ImportResponse | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<LocalPreview | null>(null);
+  const [snapshot, setSnapshot] = useState<PreviewSnapshot | null>(null);
   const [mapping, setMapping] = useState<AssetSheetMapping | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmedSnapshot, setConfirmedSnapshot] = useState<PreviewSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
@@ -37,6 +38,9 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   const [filter, setFilter] = useState<ReviewFilter>("ALL");
   const [reviewOptions, setReviewOptions] = useState<ImportReviewSearch>({});
   const [acknowledged, setAcknowledged] = useState(false);
+  const preview = snapshot?.preview ?? null;
+  const previewReady = Boolean(snapshot?.mapping && snapshot.file === file && snapshot.mapping === mapping);
+  const confirmed = previewReady && confirmedSnapshot === snapshot;
   useEffect(() => () => {
     previewGeneration.current++; authorityGeneration.current++;
     worker.current?.terminate(); worker.current = null;
@@ -46,8 +50,14 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     previewGeneration.current++;
     worker.current?.terminate(); worker.current = null; setReading(false);
   }
+  function setConfirmed(value: boolean) {
+    setConfirmedSnapshot(value && previewReady && !reading && !worker.current && !inFlight.current ? snapshot : null);
+  }
+  function restoreMapping(selectedFile = file) {
+    setMapping(snapshot?.file === selectedFile ? snapshot.mapping : null);
+  }
   function beginAuthoritativeTransition() {
-    authorityGeneration.current++; cancelPreview(); setConfirmed(false);
+    authorityGeneration.current++; cancelPreview(); restoreMapping(); setConfirmed(false);
   }
 
   function remember(next: ImportResponse, selectedFile = file, selectedUnit = unitId) {
@@ -62,8 +72,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     cancelPreview(); setConfirmed(false); setReading(true); setError("");
     const requestGeneration = previewGeneration.current;
     const authority = authorityGeneration.current;
-    const restoreMapping = preview?.layout.selected ?? preview?.layout.candidates[0] ?? null;
-    const failed = (message: string) => { setReading(false); setMapping(restoreMapping); setError(message); };
+    const failed = (message: string) => { setReading(false); restoreMapping(selectedFile); setError(message); };
     try {
       const next = new Worker(new URL("./asset-import.worker.ts", import.meta.url), { type: "module" }); worker.current = next;
       next.onmessage = (event: MessageEvent<AssetImportWorkerResult>) => {
@@ -74,7 +83,9 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
         setReading(false);
         if (result.type === "error") { failed(result.message); return; }
         if (response?.source && result.sha256 !== response.source.sha256) { failed("SHA-256 berkas berbeda dari draft. Pilih kembali berkas asli atau mulai impor baru."); return; }
-        setPreview(result); setMapping(result.layout.selected ?? result.layout.candidates[0] ?? null); setStep("mapping"); setMessage("Preview lokal siap. Konfirmasikan pemetaan sebelum unggah.");
+        const selected = result.layout.selected ?? result.layout.candidates[0] ?? null;
+        setSnapshot({ preview: result, mapping: selected, file: selectedFile, generation: requestGeneration });
+        setMapping(selected); setStep("mapping"); setMessage("Preview lokal siap. Konfirmasikan pemetaan sebelum unggah.");
       };
       next.onerror = () => {
         if (worker.current !== next || previewGeneration.current !== requestGeneration || authorityGeneration.current !== authority) return;
@@ -86,7 +97,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   }
   function selectFile(selected: File | undefined) {
     if (inFlight.current) return;
-    cancelPreview(); setPreview(null); setMapping(null); setConfirmed(false); setError("");
+    cancelPreview(); setSnapshot(null); setMapping(null); setConfirmed(false); setError("");
     if (!selected) { setFile(null); return; }
     if (!/\.xlsx$/i.test(selected.name)) { setFile(null); setError("Gunakan berkas .xlsx."); return; }
     if (selected.size < 1 || selected.size > MAX_WORKBOOK_BYTES) { setFile(null); setError("Ukuran berkas harus 1 byte hingga 50 MiB."); return; }
@@ -100,13 +111,14 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     setError("Respons terputus atau permintaan gagal. Status tersimpan diperiksa; gunakan Periksa status sebelum mencoba tindakan lagi.");
   }
   async function run() {
-    if (inFlight.current || reading || !file || !preview || !mapping || !confirmed || !actorUnits.some(unit => unit.id === unitId)) return;
+    const ready = snapshot;
+    if (inFlight.current || worker.current || reading || !previewReady || !ready?.mapping || !confirmed || confirmedSnapshot?.generation !== ready.generation || !actorUnits.some(unit => unit.id === unitId)) return;
     beginAuthoritativeTransition(); inFlight.current = true; setBusy(true); setError(""); setAcknowledged(false);
     let current = response;
     try {
-      if (!current) { current = await api.create(unitId, file, preview.sha256); remember(current); }
-      if (current.stage === "UPLOAD") { if (!current.upload) throw new Error("Missing signature"); await api.upload(file, current.upload); current = await api.complete(current.importId); remember(current); }
-      current = await api.saveMapping(current.importId, mapping, { ruleVersion: preview.ruleVersion, layoutHash: preview.layoutHash, canonicalHash: preview.canonicalHash }); remember(current);
+      if (!current) { current = await api.create(unitId, ready.file, ready.preview.sha256); remember(current); }
+      if (current.stage === "UPLOAD") { if (!current.upload) throw new Error("Missing signature"); await api.upload(ready.file, current.upload); current = await api.complete(current.importId); remember(current); }
+      current = await api.saveMapping(current.importId, ready.mapping, { ruleVersion: ready.preview.ruleVersion, layoutHash: ready.preview.layoutHash, canonicalHash: ready.preview.canonicalHash }); remember(current);
       current = await api.process(current.importId); remember(current); setStep(stepFor(current)); setMessage("Validasi server selesai.");
     } catch { if (current) await recover(current.importId); else setError("Draft belum dapat dipastikan. Muat ulang halaman dan periksa daftar draft sebelum membuat impor baru."); }
     finally { inFlight.current = false; setBusy(false); }
@@ -120,7 +132,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   }
   async function resume(draft: ImportDraft) {
     if (inFlight.current || !actorUnits.some(unit => unit.id === draft.unitId)) return;
-    beginAuthoritativeTransition(); setResponse(null); setStep("source"); setMessage(""); setFile(null); setPreview(null); setMapping(null); setConfirmed(false); setAcknowledged(false); setUnitId(draft.unitId); setFilter("ALL");
+    beginAuthoritativeTransition(); setResponse(null); setStep("source"); setMessage(""); setFile(null); setSnapshot(null); setMapping(null); setConfirmed(false); setAcknowledged(false); setUnitId(draft.unitId); setFilter("ALL");
     await refresh(draft.importId, "ALL", 0, {});
   }
   async function retry() {
@@ -144,6 +156,6 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     catch { await recover(response.importId); }
     finally { inFlight.current = false; setBusy(false); }
   }
-  function startNew() { if (inFlight.current) return; beginAuthoritativeTransition(); setResponse(null); setFile(null); setPreview(null); setMapping(null); setConfirmed(false); setError(""); setMessage(""); setStep("source"); setAcknowledged(false); setFilter("ALL"); setReviewOptions({}); }
-  return { unitId, setUnitId, drafts, response, file, preview, mapping, confirmed, setConfirmed, busy, reading, error, message, step, setStep, filter, reviewOptions, acknowledged, setAcknowledged, selectFile, changeMapping, run, refresh, resume, retry, verifyUpload, submit, startNew };
+  function startNew() { if (inFlight.current) return; beginAuthoritativeTransition(); setResponse(null); setFile(null); setSnapshot(null); setMapping(null); setConfirmed(false); setError(""); setMessage(""); setStep("source"); setAcknowledged(false); setFilter("ALL"); setReviewOptions({}); }
+  return { unitId, setUnitId, drafts, response, file, preview, previewReady, mapping, confirmed, setConfirmed, busy, reading, error, message, step, setStep, filter, reviewOptions, acknowledged, setAcknowledged, selectFile, changeMapping, run, refresh, resume, retry, verifyUpload, submit, startNew };
 }
