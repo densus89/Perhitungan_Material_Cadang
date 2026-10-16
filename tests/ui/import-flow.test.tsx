@@ -1,12 +1,48 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportWorkspace } from "../../src/features/import/ImportWorkspace";
-import { units, id, base, mapping, FakeWorker } from "../fixtures/import-ui";
+import { units, id, base, mapping, preview, FakeWorker } from "../fixtures/import-ui";
+import { useAssetImport } from "../../src/features/import/useAssetImport";
 const network = vi.hoisted(() => ({ fetch: vi.fn(), upload: vi.fn() }));
 vi.mock("../../src/lib/supabase/browser", () => ({ createBrowserSupabaseClient: () => ({ storage: { from: () => ({ uploadToSignedUrl: network.upload }) } }) }));
 beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker); vi.stubGlobal("fetch", network.fetch); network.fetch.mockReset(); network.upload.mockReset().mockResolvedValue({ error: null }); });
 function selectFile(file = new File(["synthetic"], "snapshot.xlsx")) { fireEvent.change(screen.getByLabelText("Berkas snapshot XLSX"), { target: { files: [file] } }); }
 describe("persistent asset import", () => {
+  it("retains usable sheet and indexed mapping controls after a re-preview error", async () => {
+    const alternate = { ...mapping, sheetName: "ALTERNATE" };
+    class DeferredWorker extends FakeWorker { postMessage = vi.fn(); }
+    vi.stubGlobal("Worker", DeferredWorker);
+    render(<ImportWorkspace initialDrafts={[]} actorUnits={units} />); selectFile();
+    await act(async () => FakeWorker.instances[0].onmessage?.({ data: { ...preview, layout: { ...preview.layout, candidates: [mapping, alternate] } } }));
+    fireEvent.change(screen.getByLabelText("Sheet dan baris header"), { target: { value: "ALTERNATE:1" } });
+    await act(async () => FakeWorker.instances[1].onmessage?.({ data: { type: "error", message: "Invalid alternate mapping" } }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Invalid alternate mapping");
+    expect(screen.getByLabelText("Sheet dan baris header")).toBeEnabled();
+    expect(screen.getByLabelText("UPT (wajib)")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Unggah dan proses di server" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Sheet dan baris header"), { target: { value: "DATA:1" } });
+    expect(FakeWorker.instances).toHaveLength(3);
+    await act(async () => FakeWorker.instances[2].onmessage?.({ data: preview }));
+    expect(screen.getByLabelText("Sheet dan baris header")).toHaveValue("DATA:1");
+  });
+  it("invalidates a deferred preview when persisted processing advances authoritative state", async () => {
+    class DeferredWorker extends FakeWorker { postMessage = vi.fn(); }
+    vi.stubGlobal("Worker", DeferredWorker);
+    const summary = { rowCount: 5, blockingErrors: 0, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: {}, totalNilaiABC: 0 };
+    network.fetch.mockResolvedValueOnce(Response.json({ ...base, stage: "READY_TO_PROCESS", layout: mapping })).mockResolvedValueOnce(Response.json({ ...base, stage: "READY_TO_SUBMIT", summary }));
+    const { result } = renderHook(() => useAssetImport([], units));
+    await act(async () => result.current.resume({ ...base, unitId: units[0].id, fileName: "stored.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "READY_TO_PROCESS", rowCount: null }));
+    act(() => result.current.selectFile(new File(["synthetic"], "stored.xlsx")));
+    expect(result.current.reading).toBe(true);
+    const late = FakeWorker.instances[0].onmessage!;
+    await act(async () => result.current.retry());
+    await act(async () => late({ data: preview }));
+    expect(result.current.response?.stage).toBe("READY_TO_SUBMIT");
+    expect(result.current.step).toBe("quality");
+    expect(result.current.preview).toBeNull();
+    expect(result.current.reading).toBe(false);
+    expect(FakeWorker.instances[0].terminate).toHaveBeenCalled();
+  });
   it("selects assigned units, exposes template, validates XLSX/50 MiB before Worker work", () => {
     render(<ImportWorkspace initialDrafts={[]} actorUnits={units} />);
     expect(screen.getByLabelText("Unit Induk").querySelectorAll("option")).toHaveLength(1);
