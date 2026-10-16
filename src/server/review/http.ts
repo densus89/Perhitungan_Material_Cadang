@@ -4,14 +4,21 @@ import { ActorAccessError, requireActor } from "../auth/actor";
 import { createAdminSupabaseClient } from "../../lib/supabase/admin";
 import { createServerSupabaseClient } from "../../lib/supabase/server";
 import { importReviewQuerySchema } from "../../domain/asset-import/schemas";
-import { reviewActionSchema, reviewFiltersSchema } from "../../features/import/review-contracts";
-import { assertReviewer, createReviewDependencies, listPendingAssetVersions, loadAssetVersionReview, approveAndActivateAssetVersion, returnAssetVersion, trashAssetVersion, ReviewError } from "./asset-version-service";
+import { comparisonQuerySchema, mappingQuerySchema, reviewActionSchema, reviewFiltersSchema } from "../../features/import/review-contracts";
+import { assertReviewer, createReviewDependencies, listPendingAssetVersions, loadAssetVersionReview, loadAssetVersionComparison, loadAssetVersionMapping, approveAndActivateAssetVersion, returnAssetVersion, trashAssetVersion, ReviewError } from "./asset-version-service";
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" } });
 function failure(error: unknown) { const known = error instanceof ActorAccessError || error instanceof ReviewError; return json({ code: known ? error.code : "REVIEW_FAILED", message: "Tinjauan tidak dapat diproses. Muat ulang untuk memeriksa status terbaru." }, known ? error.status : 500); }
 async function context() { const actor = await requireActor(await createServerSupabaseClient()); assertReviewer(actor); return actor; }
 export async function reviewRead(request: Request, versionId?: string) {
   try {
     const actor = await context(); const params = Object.fromEntries(new URL(request.url).searchParams);
+    if (versionId && params.view) {
+      if (!z.uuid().safeParse(versionId).success) throw new ReviewError("INVALID_INPUT", 422);
+      const { view, ...query } = params;
+      if (view === "comparison") { const parsed = comparisonQuerySchema.safeParse(query); if (!parsed.success) throw new ReviewError("INVALID_INPUT", 422); return json(await loadAssetVersionComparison(actor, versionId, createReviewDependencies(createAdminSupabaseClient()), parsed.data)); }
+      if (view === "mapping") { const parsed = mappingQuerySchema.safeParse(query); if (!parsed.success) throw new ReviewError("INVALID_INPUT", 422); return json(await loadAssetVersionMapping(actor, versionId, createReviewDependencies(createAdminSupabaseClient()), parsed.data.offset)); }
+      throw new ReviewError("INVALID_INPUT", 422);
+    }
     const parsed = (versionId ? importReviewQuerySchema : reviewFiltersSchema).safeParse(versionId ? { offset: Number(params.offset ?? 0), filter: "ALL", ...params, ...(params.offset !== undefined ? { offset: Number(params.offset) } : {}) } : params);
     if (!parsed.success || versionId !== undefined && !z.uuid().safeParse(versionId).success) throw new ReviewError("INVALID_INPUT", 422);
     const deps = createReviewDependencies(createAdminSupabaseClient());

@@ -17,11 +17,11 @@ insert into public.dataset_versions(id,dataset_id,version_number) select pg_temp
 insert into public.source_files(id,unit_induk_id,object_path,original_name,byte_size,sha256,uploaded_by) select pg_temp.uid(5,n),pg_temp.uid(2,1),'unit/'||pg_temp.uid(2,1)||'/dataset/'||pg_temp.uid(3,1)||'/version/'||pg_temp.uid(4,n)||'/'||pg_temp.uid(5,n)||'.xlsx','synthetic-review.xlsx',1,repeat('a',64),pg_temp.uid(1,1) from generate_series(1,7)n;
 insert into public.import_sessions(id,unit_induk_id,dataset_id,dataset_version_id,source_file_id,created_by) select pg_temp.uid(6,n),pg_temp.uid(2,1),pg_temp.uid(3,1),pg_temp.uid(4,n),pg_temp.uid(5,n),pg_temp.uid(1,1) from generate_series(1,7)n;
 insert into public.import_sheets(id,import_session_id,unit_induk_id,sheet_name,header_row,diagnostics) select pg_temp.uid(7,n),pg_temp.uid(6,n),pg_temp.uid(2,1),'Assets',1,jsonb_build_object('uploadVerified',repeat('a',64)) from generate_series(1,7)n;
-create function pg_temp.prepare(n integer,rows_count integer,kind text) returns void language plpgsql as $$
+create function pg_temp.prepare(n integer,rows_count integer,kind text,width integer default 1) returns void language plpgsql as $$
 declare run_id uuid:=pg_temp.uid(8,n); revision uuid; base_id uuid; base_run uuid;
 begin
  select public.replace_asset_import_mapping(pg_temp.uid(1,1),pg_temp.uid(6,n),pg_temp.uid(7,n),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,n)),
- '{"sheetName":"Assets","headerRow":1,"columns":[{"columnIndex":1,"columnLetter":"A","header":"NO_ASET","normalizedHeader":"NO ASET","field":"noAset","confidence":1}],"confidence":1,"score":1,"missingRequiredFields":[],"ambiguousFields":[]}',repeat('b',64),repeat('c',64),'test',repeat('a',64)) into revision;
+ jsonb_build_object('sheetName','Assets','headerRow',1,'columns',(select jsonb_agg(jsonb_build_object('columnIndex',i,'columnLetter','A','header',case when i=1 then 'NO_ASET' else 'EXTRA_'||i end,'normalizedHeader',case when i=1 then 'NO ASET' else 'EXTRA '||i end,'field',case when i=1 then 'noAset' else null end,'confidence',1) order by i) from generate_series(1,width)i),'confidence',1,'score',1,'missingRequiredFields','[]'::jsonb,'ambiguousFields','[]'::jsonb),repeat('b',64),repeat('c',64),'test',repeat('a',64)) into revision;
  perform public.reserve_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(6,n),revision,jsonb_build_object('id',run_id,'expected_row_count',rows_count,'expected_valuation_count',rows_count,'source_hash',repeat('a',64),'mapping_hash',repeat('b',64),'rule_version','test','expected_rows_hash',repeat('c',64),'expected_valuations_hash',repeat('d',64)));
  if kind='INCOMPLETE' then return; end if;
  insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_version_id,import_sheet_id,source_row_number,no_aset,nama_peralatan,kondisi_aset,error_codes,warning_codes)
@@ -103,5 +103,23 @@ select is((select count(*) from public.mapping_profiles where source_version_id=
 select lives_ok($$select pg_temp.review(1,'TRASH',3)$$,'Admin may logically trash history without purging referenced evidence');
 select is((select count(*) from public.asset_snapshot_rows where dataset_version_id=pg_temp.uid(4,1)),101::bigint,'Historical trash retains every comparison/approval-referenced row');
 select is((select count(*) from public.approval_events where dataset_version_id=pg_temp.uid(4,1) and action='ACTIVATED'),1::bigint,'Historical trash retains activation evidence');
+insert into public.dataset_versions(id,dataset_id,version_number) select pg_temp.uid(4,n),pg_temp.uid(3,1),n from generate_series(8,9)n;
+insert into public.source_files(id,unit_induk_id,object_path,original_name,byte_size,sha256,uploaded_by) select pg_temp.uid(5,n),pg_temp.uid(2,1),'unit/'||pg_temp.uid(2,1)||'/dataset/'||pg_temp.uid(3,1)||'/version/'||pg_temp.uid(4,n)||'/'||pg_temp.uid(5,n)||'.xlsx','synthetic-wide.xlsx',1,repeat('a',64),pg_temp.uid(1,1) from generate_series(8,9)n;
+insert into public.import_sessions(id,unit_induk_id,dataset_id,dataset_version_id,source_file_id,created_by) select pg_temp.uid(6,n),pg_temp.uid(2,1),pg_temp.uid(3,1),pg_temp.uid(4,n),pg_temp.uid(5,n),pg_temp.uid(1,1) from generate_series(8,9)n;
+insert into public.import_sheets(id,import_session_id,unit_induk_id,sheet_name,header_row,diagnostics) select pg_temp.uid(7,n),pg_temp.uid(6,n),pg_temp.uid(2,1),'Assets',1,jsonb_build_object('uploadVerified',repeat('a',64)) from generate_series(8,9)n;
+select pg_temp.prepare(8,1,'DIRECT',501);
+select lives_ok($$select pg_temp.review(8,'RETURN')$$,'501-column mapping does not prevent return');
+select lives_ok($$select public.submit_asset_version(pg_temp.uid(1,1),pg_temp.uid(4,8),pg_temp.uid(8,8),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,8)),repeat('b',64),pg_temp.uid(4,7),pg_temp.uid(9,8))$$,'Wide mapping can resubmit with full authoritative mapping validation');
+select lives_ok($$select pg_temp.review(8)$$,'501-column mapping does not prevent activation');
+select pg_temp.prepare(9,1,'DIRECT',16384);
+select lives_ok($$select public.get_asset_version_review_state(pg_temp.uid(4,9))$$,'Maximum-width review state loads without materializing every mapping column');
+select is((public.get_asset_version_review_state(pg_temp.uid(4,9))->>'mappingCount')::integer,16384,'Authoritative state counts all 16384 persisted mappings');
+select ok(octet_length(public.get_asset_version_review_state(pg_temp.uid(4,9))::text)<20000,'Maximum-width state remains a small response without the full mapping document');
+update public.import_column_mappings set source_header='SYNTHETIC_TAMPER' where import_session_id=pg_temp.uid(6,9) and source_column_index=16384;
+select throws_ok($$select pg_temp.review(9)$$,'22023',null,'Approval validates the final hidden mapping column, not just the display page');
+update public.import_column_mappings set source_header='EXTRA_16384' where import_session_id=pg_temp.uid(6,9) and source_column_index=16384;
+select lives_ok($$select pg_temp.review(9,'ACTIVATE',2,'{}','{"offset":0,"filter":"ALL"}',true)$$,'16384-column mapping activates with complete audited profile promotion');
+select is((select jsonb_array_length(mapping->'columns') from public.mapping_profiles where source_version_id=pg_temp.uid(4,9)),16384,'Promotion preserves all mapping columns despite display pagination');
+select lives_ok($$select pg_temp.review(8,'TRASH',3)$$,'Wide historical mapping does not prevent logical trash');
 select * from finish();
 rollback;
