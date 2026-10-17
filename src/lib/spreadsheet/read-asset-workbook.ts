@@ -31,11 +31,17 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** Stable formula evidence shape, independent of ExcelJS model-key ordering. */
+export function assetFormulaValue(value: object, result: unknown): unknown {
+  const metadata: Record<string, unknown> = {};
+  for (const key of ["formula", "ref", "shareType", "sharedFormula"]) { const field: unknown = Reflect.get(value, key); if (typeof field === "string") metadata[key] = field; }
+  return { ...metadata, result };
+}
 export function assetCellValue(cell: ExcelJS.Cell): unknown {
   const value = cell.value;
   // ExcelJS 4.4 Cell.value omits falsy formula caches. Its public result
   // accessor retains 0, which must remain a valid book value and asset age.
-  return cell.type === ExcelJS.ValueType.Formula && value && typeof value === "object" ? { ...value, result: cell.result } : value;
+  return cell.type === ExcelJS.ValueType.Formula && value && typeof value === "object" ? assetFormulaValue(value, cell.result) : value;
 }
 function rowValues(sheet: ExcelJS.Worksheet, rowNumber: number): unknown[] {
   const row = sheet.getRow(rowNumber);
