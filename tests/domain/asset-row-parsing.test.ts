@@ -65,8 +65,8 @@ describe("canonical asset rows", () => {
       expect(invalid.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "INVALID_FORMULA_RESULT", address: "M7" })]));
     }
   });
-  it("rejects missing candidate components and marked examples and subtotals", () => {
-    for (const indexes of [[0, 1, 2, 3, 4], [5, 6], [7], [8]]) {
+  it("rejects rows without asset identity/equipment and marked examples and subtotals", () => {
+    for (const indexes of [[0, 1, 2, 3, 4], [5, 6]]) {
       const values: unknown[] = [...assetRow];
       indexes.forEach((index) => { values[index] = null; });
       expect(canonicalizeAssetRow(values, mapping, provenance).candidate).toBe(false);
@@ -74,6 +74,13 @@ describe("canonical asset rows", () => {
     for (const label of ["CONTOH", "SUBTOTAL", "TOTAL"]) {
       expect(canonicalizeAssetRow([label, ...assetRow.slice(1)], mapping, provenance).candidate).toBe(false);
     }
+  });
+  it.each([[7, "jumlah"], [8, "satuan"]] as const)("retains a clear asset with missing source column %s as a blocking %s error", (index, field) => {
+    const values: unknown[] = [...assetRow]; values[index] = null;
+    const row = canonicalizeAssetRow(values, mapping, provenance);
+    expect(row.candidate).toBe(true);
+    expect(row.rejectionReason).toBeNull();
+    expect(row.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "MISSING_REQUIRED_FIELD", field })]));
   });
   it("accepts P0 through P4 without deriving age from condition", () => {
     for (const condition of ["P0", "P1", "P2", "P3", "P4"]) {

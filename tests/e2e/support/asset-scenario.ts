@@ -60,7 +60,7 @@ export async function createAssetScenario(): Promise<AssetScenario> {
   } catch (error) { await cleanupAssetScenario(scenario); throw error; }
 }
 
-export async function cleanupAssetScenario(scenario: AssetScenario) {
+export async function cleanupAssetScenario(scenario: AssetScenario, options: { timeoutMs?: number } = {}) {
   const { client, unitId, otherUnitId, runId } = scenario;
   // Verify exact IDs, unique codes and authenticated metadata before any purge.
   for (const [id, code] of [[unitId, scenario.unitCode], [otherUnitId, scenario.otherUnitCode]]) {
@@ -89,7 +89,7 @@ export async function cleanupAssetScenario(scenario: AssetScenario) {
       `delete from public.dataset_versions where dataset_id in(select id from public.datasets where unit_induk_id in (${ids}));`,
       `delete from public.datasets where unit_induk_id in (${ids});`, `delete from public.user_unit_assignments where unit_induk_id in (${ids});`, `delete from public.unit_induk where id in (${ids});`, "commit;"].join("\n");
     const path = join(directory, "cleanup.sql"); await writeFile(path, sql);
-    const result = spawnSync(process.execPath, [resolve("node_modules/supabase/dist/supabase.js"), "db", "query", "--linked", "--file", path, "--output", "json", "--agent", "no"], { encoding: "utf8", timeout: 120000 });
+    const result = spawnSync(process.execPath, [resolve("node_modules/supabase/dist/supabase.js"), "db", "query", "--linked", "--file", path, "--output", "json", "--agent", "no"], { encoding: "utf8", timeout: options.timeoutMs ?? 120000 });
     if (result.status !== 0) throw new Error(`Synthetic asset cleanup failed for run ${runId}; exact resources retained for recovery`);
     for (const user of users) requireE2eSuccess(await client.auth.admin.deleteUser(user.id), "isolated user cleanup");
     const remaining = requireE2eData(await client.from("unit_induk").select("id").in("id", [unitId, otherUnitId]), "isolated cleanup proof");
@@ -102,19 +102,29 @@ export async function loginAssetActor(page: Page, scenario: AssetScenario, kind:
   const user = scenario.users[kind]; if (!user) throw new Error("Synthetic actor absent");
   await page.goto("/login/"); await page.getByLabel("Email PLN").fill(user.email); await page.getByLabel("Kata sandi").fill(process.env.E2E_TEST_PASSWORD!); await page.getByRole("button", { name: "Masuk", exact: true }).click(); await expect(page).toHaveURL(/\/ringkasan\/$/);
 }
-export async function uploadAssetWorkbook(page: Page, scenario: AssetScenario, name: string, options: { invalid?: boolean; revised?: boolean } = {}): Promise<ImportResponse> {
-  const headers = ["UNIT_INDUK", "UPT", "NAMA_GI", "TID", "NO_ASET", "NAMA_PERALATAN", "SPESIFIKASI_MARA", "JUMLAH", "SATUAN", "KONDISI_ASET", "USIA_ASET_TAHUN", "NILAI_BUKU_SAP", "HARGA_PENGADAAN_SAAT_INI"];
-  const row = [scenario.unitCode, "UPT SYNTHETIC", "GI SYNTHETIC", "T-01", "A-01", "TRAFO", "150/20 kV 60 MVA", 1, "UNIT", options.invalid ? "PX" : "P2", 10, options.revised ? 125 : 0, 500];
-  const buffer = Buffer.from(await workbookBytes([{ name: "DATA_ASET", rows: [headers, row, [...row.slice(0, 3), "T-02", "A-02", ...row.slice(5, 11), 100, 600]] }]));
-  await page.getByLabel("Berkas snapshot XLSX").setInputFiles({ name: scenario.fileName(name), mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer });
-  await expect(page.getByRole("heading", { name: "Konfirmasi sheet, header & target" })).toBeVisible();
-  await expect(page.getByLabel(/Saya mengonfirmasi pemetaan sheet/)).toBeEnabled(); await page.getByLabel(/Saya mengonfirmasi pemetaan sheet/).check();
+type UploadOptions = { previewTimeoutMs?: number; processTimeoutMs?: number };
+async function uploadAssetInput(page: Page, scenario: AssetScenario, input: string | { name: string; mimeType: string; buffer: Buffer }, options: UploadOptions = {}): Promise<ImportResponse> {
+  const uploadExpect = baseExpect.configure({ timeout: options.previewTimeoutMs ?? 30000 });
+  if (typeof input === "string") await page.getByLabel("Berkas snapshot XLSX").setInputFiles(input);
+  else await page.getByLabel("Berkas snapshot XLSX").setInputFiles(input);
+  await uploadExpect(page.getByRole("heading", { name: "Konfirmasi sheet, header & target" })).toBeVisible();
+  await uploadExpect(page.getByLabel(/Saya mengonfirmasi pemetaan sheet/)).toBeEnabled();
+  await page.getByLabel(/Saya mengonfirmasi pemetaan sheet/).check();
   const requested = page.waitForRequest(request => request.url().endsWith("/process/") && request.method() === "POST");
-  const completed = page.waitForResponse(response => response.url().endsWith("/process/") && response.request().method() === "POST", { timeout: 300000 });
+  const completed = page.waitForResponse(response => response.url().endsWith("/process/") && response.request().method() === "POST", { timeout: options.processTimeoutMs ?? 300000 });
   await page.getByRole("button", { name: "Unggah dan proses di server" }).click(); await requested; const started = Date.now();
   const response = await completed; scenario.processDurationsMs.push(Date.now() - started);
   if (response.status() !== 200) { const body = await response.json(); throw new Error(`Synthetic processing failed with HTTP ${response.status()} (${typeof body.code === "string" && /^[A-Z_]+$/.test(body.code) ? body.code : "UNKNOWN"})`); }
   const result = await response.json() as ImportResponse;
-  await expect(page.getByRole("heading", { name: "Kualitas & bukti nilai" })).toBeVisible();
+  await uploadExpect(page.getByRole("heading", { name: "Kualitas & bukti nilai" })).toBeVisible();
   return result;
+}
+export async function uploadAssetWorkbookPath(page: Page, scenario: AssetScenario, path: string, options: UploadOptions = {}): Promise<ImportResponse> {
+  return uploadAssetInput(page, scenario, path, options);
+}
+export async function uploadAssetWorkbook(page: Page, scenario: AssetScenario, name: string, options: { invalid?: boolean; revised?: boolean } = {}): Promise<ImportResponse> {
+  const headers = ["UNIT_INDUK", "UPT", "NAMA_GI", "TID", "NO_ASET", "NAMA_PERALATAN", "SPESIFIKASI_MARA", "JUMLAH", "SATUAN", "KONDISI_ASET", "USIA_ASET_TAHUN", "NILAI_BUKU_SAP", "HARGA_PENGADAAN_SAAT_INI"];
+  const row = [scenario.unitCode, "UPT SYNTHETIC", "GI SYNTHETIC", "T-01", "A-01", "TRAFO", "150/20 kV 60 MVA", 1, "UNIT", options.invalid ? "PX" : "P2", 10, options.revised ? 125 : 0, 500];
+  const buffer = Buffer.from(await workbookBytes([{ name: "DATA_ASET", rows: [headers, row, [...row.slice(0, 3), "T-02", "A-02", ...row.slice(5, 11), 100, 600]] }]));
+  return uploadAssetInput(page, scenario, { name: scenario.fileName(name), mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer });
 }

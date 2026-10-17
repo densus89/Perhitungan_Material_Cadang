@@ -42,6 +42,12 @@ const columnPairs = {
 function storedAsset(row: Row<"asset_snapshot_rows">): ComparableAsset {
   return { ...Object.fromEntries(Object.entries(columnPairs).map(([field, column]) => [field, row[column]])) as unknown as CanonicalAssetInput, id: row.id };
 }
+async function insertInWindows<T extends "asset_snapshot_rows" | "asset_valuations">(table: T, records: Row<T>[], deps: ImportDependencies) {
+  const batches = Array.from({ length: Math.ceil(records.length / 1000) }, (_, index) => records.slice(index * 1000, (index + 1) * 1000));
+  for (let index = 0; index < batches.length; index += 8) {
+    await Promise.all(batches.slice(index, index + 8).map((batch) => deps.insert(table, batch)));
+  }
+}
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {
   const summary = { rowCount: rows.length, blockingErrors: 0, warningCount: 0, valueSources: {} as Record<string, number>, conditions: {} as Record<string, number>, issueCounts: {} as Record<string, number>, totalNilaiABC: 0 };
   const increment = (record: Record<string, number>, key: string) => { record[key] = (record[key] ?? 0) + 1; };
@@ -139,10 +145,8 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   try { await deps.reserve(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: { id: runId, expected_row_count: rows.length, expected_valuation_count: values.length, source_hash: source.sha256, mapping_hash: parsed.layoutHash, rule_version: diagnostics.data.ruleVersion, expected_rows_hash: expected.rowsHash, expected_valuations_hash: expected.valuationsHash } }); }
   catch { throw new ImportError("CONFLICT"); }
   try {
-    for (let offset = 0; offset < rows.length; offset += 1000) {
-      await deps.insert("asset_snapshot_rows", rows.slice(offset, offset + 1000));
-      await deps.insert("asset_valuations", values.slice(offset, offset + 1000));
-    }
+    await insertInWindows("asset_snapshot_rows", rows, deps);
+    await insertInWindows("asset_valuations", values, deps);
     const storedRows = await deps.list("asset_snapshot_rows", { import_run_id: runId, unit_induk_id: session.unit_induk_id }), storedValues = await deps.list("asset_valuations", { import_run_id: runId, unit_induk_id: session.unit_induk_id });
     const actual = persistedRecordHashes(storedRows, storedValues);
     if (storedRows.length !== rows.length || storedValues.length !== values.length || actual.rowsHash !== expected.rowsHash || actual.valuationsHash !== expected.valuationsHash) throw new ImportError("PROCESS_FAILED");

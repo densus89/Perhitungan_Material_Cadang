@@ -66,6 +66,10 @@ export function canonicalizeAssetRow(row: readonly unknown[], mapping: AssetShee
   else if (labels.some((label) => /^(?:CONTOH|EXAMPLE|SAMPLE)(?: |$)/.test(label))) rejectionReason = "EXAMPLE";
   else if (labels.some((label) => /^(?:SUBTOTAL|SUB TOTAL|GRAND TOTAL|TOTAL)(?: |$)/.test(label))) rejectionReason = "SUBTOTAL";
   else if (mapping.columns.filter((column) => column.field && normalizeHeader(row[column.columnIndex - 1]) === column.normalizedHeader).length >= 4) rejectionReason = "REPEATED_HEADER";
-  else if (!(asset.tid || asset.noAset || asset.namaGi || asset.bayPenghantar || asset.unitInduk || asset.upt) || !(asset.namaPeralatan || asset.spesifikasiMara) || !sources.jumlah || isBlank(sources.jumlah.rawValue) || !asset.satuan) rejectionReason = "INCOMPLETE_CANDIDATE";
+  // Once identity/location and equipment/specification establish that this is
+  // an asset row, retain it in the draft. Missing quantity/unit are blocking
+  // field errors above, not grounds to silently remove the asset from a full
+  // snapshot or make it look deleted in the version comparison.
+  else if (!(asset.tid || asset.noAset || asset.namaGi || asset.bayPenghantar || asset.unitInduk || asset.upt) || !(asset.namaPeralatan || asset.spesifikasiMara)) rejectionReason = "INCOMPLETE_CANDIDATE";
   return { asset, provenance, sources, issues, ageSource, candidate: rejectionReason === null, rejectionReason };
 }

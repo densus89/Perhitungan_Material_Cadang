@@ -119,6 +119,19 @@ describe("authoritative workbook processing", () => {
     const result = await processStoredWorkbook(actor, f.created.importId, f.deps); expect(result.stage).toBe("NEEDS_FIX"); expect(result.summary!.blockingErrors).toBeGreaterThan(0);
     await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" }); expect(f.events).not.toContain("submit");
   });
+  it("persists identifiable assets with blank quantity or unit and blocks incomplete snapshot submission", async () => {
+    const valid = [...assetRow]; valid[4] = "000001";
+    const missingQuantity = [...assetRow]; missingQuantity[4] = "000002"; missingQuantity[7] = null;
+    const missingUnit = [...assetRow]; missingUnit[4] = "000003"; missingUnit[8] = null;
+    const f = await prepared([valid, missingQuantity, missingUnit]);
+    const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(result).toMatchObject({ stage: "NEEDS_FIX", summary: { rowCount: 3, blockingErrors: 2 } });
+    expect(f.tables.asset_snapshot_rows.map((row) => row.no_aset)).toEqual(["000001", "000002", "000003"]);
+    expect(f.tables.asset_snapshot_rows[1].error_codes).toContain("MISSING_REQUIRED_FIELD");
+    expect(f.tables.asset_snapshot_rows[2].error_codes).toContain("MISSING_REQUIRED_FIELD");
+    await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" });
+    expect(f.events).not.toContain("submit");
+  });
   it("flags workbook rows that claim a different unit from the scoped upload", async () => {
     const row = [...assetRow]; row[0] = "OTHER UNIT"; const f = await prepared([row]);
     const result = await processStoredWorkbook(actor, f.created.importId, f.deps);

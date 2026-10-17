@@ -66,13 +66,29 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       return data;
     },
     async list(table, filters) {
-      // Paginate all private reads: PostgREST's default 1000-row cap is not completeness.
-      const rows: unknown[] = [];
-      for (let offset = 0; ; offset += 1000) {
-        const key = table === "asset_valuations" ? "asset_row_id" : table === "asset_import_run_metadata" ? "import_run_id" : "id";
-        const { data, error } = await client.from(table).select("*").match(filters).order(key).range(offset, offset + 999);
-        check(error); rows.push(...data ?? []); if (!data || data.length < 1000) break;
+      // PostgREST caps responses at 1000 rows. Fetch immutable import pages in
+      // bounded parallel windows so a unit-scale reconciliation is complete
+      // without spending the whole function budget on serial round-trips.
+      const key = table === "asset_valuations" ? "asset_row_id" : table === "asset_import_run_metadata" ? "import_run_id" : "id";
+      const first = await client.from(table).select("*", { count: "exact" }).match(filters).order(key).range(0, 999);
+      check(first.error);
+      const rows: unknown[] = [...first.data ?? []];
+      if (first.count === null || first.count === undefined) {
+        for (let offset = 1000; rows.length === offset; offset += 1000) {
+          const { data, error } = await client.from(table).select("*").match(filters).order(key).range(offset, offset + 999);
+          check(error); rows.push(...data ?? []); if (!data || data.length < 1000) break;
+        }
+        return rows as never;
       }
+      const offsets = Array.from({ length: Math.max(0, Math.ceil(first.count / 1000) - 1) }, (_, index) => (index + 1) * 1000);
+      for (let index = 0; index < offsets.length; index += 8) {
+        const pages = await Promise.all(offsets.slice(index, index + 8).map(async (offset) => {
+          const { data, error } = await client.from(table).select("*").match(filters).order(key).range(offset, offset + 999);
+          check(error); return data ?? [];
+        }));
+        for (const page of pages) rows.push(...page);
+      }
+      if (rows.length !== first.count) throw new Error("Incomplete import read");
       return rows as never;
     },
     async insert(table, rows) {
