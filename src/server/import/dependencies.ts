@@ -100,7 +100,9 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
     },
     async insertBatch(table, rows) {
       if (!rows.length || rows.length > 1000) throw new Error("Invalid import batch");
-      const { error, count } = await client.from(table).insert(rows as never, { count: "exact" }); check(error);
+      const { error, count } = await client.from(table).insert(rows as never, { count: "exact" });
+      if (error || count !== rows.length) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "insertBatch", table, code: error?.code ?? "COUNT_MISMATCH" }));
+      check(error);
       if (count !== rows.length) throw new Error("Incomplete import batch");
     },
     async update(table, filters, values) { const { error } = await client.from(table).update(values as never).match(filters); check(error); },

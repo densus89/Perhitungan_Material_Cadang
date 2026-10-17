@@ -44,8 +44,11 @@ function storedAsset(row: Row<"asset_snapshot_rows">): ComparableAsset {
 }
 async function insertInWindows<T extends "asset_snapshot_rows" | "asset_valuations">(table: T, records: Row<T>[], deps: ImportDependencies) {
   const batches = Array.from({ length: Math.ceil(records.length / 1000) }, (_, index) => records.slice(index * 1000, (index + 1) * 1000));
-  for (let index = 0; index < batches.length; index += 8) {
-    await Promise.all(batches.slice(index, index + 8).map((batch) => deps.insertBatch(table, batch)));
+  // Two payloads at a time keep hosted memory below the runtime ceiling while
+  // still overlapping network latency. Eight concurrent JSON payloads caused
+  // the 141,105-row function to terminate immediately after reservation.
+  for (let index = 0; index < batches.length; index += 2) {
+    await Promise.all(batches.slice(index, index + 2).map((batch) => deps.insertBatch(table, batch)));
   }
 }
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {
