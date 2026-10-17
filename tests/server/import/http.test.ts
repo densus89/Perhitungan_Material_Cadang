@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createImportSchema } from "../../../src/domain/asset-import/schemas";
 import { assetImportMutation } from "../../../src/server/import/http";
 import { ActorAccessError } from "../../../src/server/auth/actor";
@@ -13,9 +13,10 @@ vi.mock("../../../src/server/import/dependencies", () => ({ createImportDependen
 export const createInput = { unitId, fileName: "synthetic.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", byteSize: 123, sha256: "a".repeat(64) };
 export function request(body: unknown, origin = "https://material.example", type = "application/json") { return new Request("https://material.example/api/imports/", { method: "POST", headers: { Origin: origin, "Content-Type": type }, body: JSON.stringify(body) }); }
 beforeEach(() => {
-  vi.resetAllMocks(); vi.unstubAllEnvs(); mocks.actor.mockResolvedValue(actor);
+  vi.resetAllMocks(); vi.unstubAllEnvs(); vi.spyOn(console, "warn").mockImplementation(() => {}); mocks.actor.mockResolvedValue(actor);
   for (const [key, value] of Object.entries({ NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "public-fixture", SUPABASE_SECRET_KEY: "secret-fixture", NEXT_PUBLIC_SITE_URL: "https://material.example" })) vi.stubEnv(key, value);
 });
+afterEach(() => { vi.restoreAllMocks(); });
 const handler = async () => ({ importId: "30000000-0000-4000-8000-000000000001", stage: "UPLOAD" });
 describe("import mutation boundary", () => {
   const accepted = async () => ({ importId: "30000000-0000-4000-8000-000000000001", datasetId: "30000000-0000-4000-8000-000000000002", versionId: "30000000-0000-4000-8000-000000000003", stage: "UPLOAD" });

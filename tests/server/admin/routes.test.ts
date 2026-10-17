@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../../../app/api/admin/users/invite/route";
 import { PATCH } from "../../../app/api/admin/users/[userId]/route";
 import { ActorAccessError } from "../../../src/server/auth/actor";
@@ -10,10 +10,11 @@ vi.mock("../../../src/lib/supabase/admin", () => ({ createAdminSupabaseClient: b
 vi.mock("../../../src/server/auth/actor", async (original) => ({ ...await original<object>(), requireActor: boundary.requireActor }));
 vi.mock("../../../src/server/admin/user-service", () => ({ createUserAdminDependencies: boundary.dependencies, inviteUser: boundary.invite, updateUserAccess: boundary.update }));
 beforeEach(() => {
-  vi.resetAllMocks(); vi.unstubAllEnvs(); boundary.requireActor.mockResolvedValue({ userId: "30000000-0000-4000-8000-000000000001", role: "RST_ADMIN", status: "ACTIVE" });
+  vi.resetAllMocks(); vi.unstubAllEnvs(); vi.spyOn(console, "warn").mockImplementation(() => {}); boundary.requireActor.mockResolvedValue({ userId: "30000000-0000-4000-8000-000000000001", role: "RST_ADMIN", status: "ACTIVE" });
   for (const [key, value] of Object.entries({ NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "public-fixture", SUPABASE_SECRET_KEY: "secret-fixture", NEXT_PUBLIC_SITE_URL: "https://material.example" })) vi.stubEnv(key, value);
   boundary.invite.mockResolvedValue({ status: 201, code: "USER_INVITED", message: "Berhasil" }); boundary.update.mockResolvedValue({ status: 200, code: "ACCESS_UPDATED", message: "Berhasil" });
 });
+afterEach(() => { vi.restoreAllMocks(); });
 function request(body: unknown, method = "POST", origin = "https://material.example") { return new Request("https://material.example/api/admin/users/invite/", { method, headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(body) }); }
 const input = { email: "new@pln.co.id", displayName: "New", role: "VIEWER", unitIndukIds: [] };
 describe("admin JSON mutation routes", () => {
