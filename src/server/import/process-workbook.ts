@@ -2,14 +2,15 @@ import "server-only";
 import { z } from "zod";
 import type { Actor } from "../../domain/access";
 import type { CanonicalAssetInput, CanonicalizedAssetRow } from "../../domain/asset-import/types";
-import type { ComparableAsset } from "../../domain/asset-import/comparables";
+import { prepareComparablePool, type ComparableAsset } from "../../domain/asset-import/comparables";
 import { resolveAssetValuation } from "../../domain/asset-import/valuation";
 import { validateAssetRow } from "../../domain/asset-import/validate-row";
 import { normalizeAssetText } from "../../domain/asset-import/useful-life";
 import { hashSchema, importSummarySchema, type ImportResponse } from "../../domain/asset-import/schemas";
-import { readAssetWorkbook } from "../../lib/spreadsheet/read-asset-workbook";
+import { readNodeAssetWorkbook as readAssetWorkbook } from "./read-node-workbook";
+import { compareAssetVersions } from "./compare-asset-versions";
 import type { UsefulLifeRule, UsefulLifeAlias } from "../../reference/useful-life-perdir-0299";
-import type { ImportDependencies, Row, Insert } from "./dependencies";
+import type { ImportDependencies, Row } from "./dependencies";
 import { ownedImport, assertEditable, verifiedBytes, confirmedMapping, ImportError, sha256, asJson, loadAssetImport } from "./service";
 
 /** PostgreSQL jsonb sorts keys by UTF-8 byte length, then byte value, and expands exponents. */
@@ -41,9 +42,6 @@ const columnPairs = {
 function storedAsset(row: Row<"asset_snapshot_rows">): ComparableAsset {
   return { ...Object.fromEntries(Object.entries(columnPairs).map(([field, column]) => [field, row[column]])) as unknown as CanonicalAssetInput, id: row.id };
 }
-function identity(row: Row<"asset_snapshot_rows">) {
-  return row.no_aset?.trim() ? "ASSET:" + normalizeAssetText(row.no_aset) : "COMPOSITE:" + sha256(JSON.stringify([row.unit_induk, row.upt, row.nama_gi, row.bay_penghantar, row.tid, row.nama_peralatan, row.spesifikasi_mara, row.satuan].map(normalizeAssetText)));
-}
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {
   const summary = { rowCount: rows.length, blockingErrors: 0, warningCount: 0, valueSources: {} as Record<string, number>, conditions: {} as Record<string, number>, issueCounts: {} as Record<string, number>, totalNilaiABC: 0 };
   const increment = (record: Record<string, number>, key: string) => { record[key] = (record[key] ?? 0) + 1; };
@@ -61,8 +59,10 @@ async function referenceContext(deps: ImportDependencies, ruleVersion: string, a
   const rules: UsefulLifeRule[] = ruleRows.map((rule) => ({ id: rule.id, ruleVersion: rule.rule_version, assetFunction: rule.function_code, classCode: rule.class_code, typeCode: rule.type_code, subtypeCode: rule.subtype_code || null, years: rule.useful_life_years, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, description: rule.source_locator, sourceDocument: rule.source_document, sourceLocator: rule.source_locator, verifiedBy: rule.source_hash, approval: "SOURCE_VERIFIED" }));
   const aliases: UsefulLifeAlias[] = (await deps.list("asset_class_mappings", {})).filter((entry) => ruleRows.some((rule) => rule.id === entry.useful_life_rule_id) && entry.effective_from <= asOf && (!entry.effective_to || asOf < entry.effective_to)).map((entry) => ({ alias: entry.alias_key, ruleIds: [entry.useful_life_rule_id], approvedBy: entry.approved_by, approvedAt: entry.approved_at.slice(0, 10), evidence: entry.approval_evidence }));
   const coordinates = await deps.list("gi_location_references", {});
+  const coordinateKey = (unit: string | null, upt: string | null, gi: string | null) => JSON.stringify([unit, upt, gi].map(normalizeAssetText));
+  const coordinateIndex = new Map(coordinates.map(entry => [coordinateKey(entry.unit_induk_key, entry.upt_key, entry.nama_gi_key), entry]));
   const coordinateFor = (asset: ComparableAsset) => {
-    const found = coordinates.find((entry) => entry.unit_induk_key === normalizeAssetText(asset.unitInduk) && entry.upt_key === normalizeAssetText(asset.upt) && entry.nama_gi_key === normalizeAssetText(asset.namaGi));
+    const found = coordinateIndex.get(coordinateKey(asset.unitInduk, asset.upt, asset.namaGi));
     return found ? { latitude: found.latitude, longitude: found.longitude } : null;
   };
   const donors: ComparableAsset[] = [];
@@ -87,19 +87,8 @@ async function persistComparison(actor: Actor, session: Row<"import_sessions">, 
   if (!previousRun) throw new ImportError("COMPARISON_FAILED");
   const before = await deps.list("asset_snapshot_rows", { import_run_id: previousRun.id, unit_induk_id: session.unit_induk_id });
   const beforeValues = await deps.list("asset_valuations", { import_run_id: previousRun.id, unit_induk_id: session.unit_induk_id });
-  const group = (records: Row<"asset_snapshot_rows">[]) => { const map = new Map<string, Row<"asset_snapshot_rows">[]>(); for (const row of records) map.set(identity(row), [...map.get(identity(row)) ?? [], row]); return map; };
-  const oldGroups = group(before), newGroups = group(rows), comparisonId = deps.id();
-  const kinds = { ADDED: 0, REMOVED: 0, CHANGED: 0, UNCHANGED: 0, AMBIGUOUS: 0 };
-  const changes: Insert<"asset_version_changes">[] = [...new Set([...oldGroups.keys(), ...newGroups.keys()])].sort().map((key) => {
-    const oldRows = oldGroups.get(key) ?? [], newRows = newGroups.get(key) ?? [], from = oldRows[0], to = newRows[0];
-    const previousValue = beforeValues.find((value) => value.asset_row_id === from?.id), nextValue = values.find((value) => value.asset_row_id === to?.id);
-    const changed = from && to ? Object.values(columnPairs).filter((field) => from[field] !== to[field]) as string[] : [];
-    if (from && to && previousValue?.nilai_abc !== nextValue?.nilai_abc) changed.push("nilai_abc");
-    if (from && to && previousValue?.value_source !== nextValue?.value_source) changed.push("value_source");
-    const kind = oldRows.length > 1 || newRows.length > 1 ? "AMBIGUOUS" : !from ? "ADDED" : !to ? "REMOVED" : changed.length ? "CHANGED" : "UNCHANGED";
-    kinds[kind]++;
-    return { comparison_id: comparisonId, unit_induk_id: session.unit_induk_id, identity_key: key, change_kind: kind, from_row_id: from?.id ?? null, to_row_id: to?.id ?? null, changed_fields: changed, evidence: { fromCount: oldRows.length, toCount: newRows.length } };
-  });
+  const comparisonId = deps.id();
+  const { counts: kinds, changes } = compareAssetVersions({ before, after: rows, beforeValues, afterValues: values }, { comparisonId, unitId: session.unit_induk_id, fields: Object.values(columnPairs) });
   await deps.insert("version_comparisons", [{ id: comparisonId, dataset_id: session.dataset_id, unit_induk_id: session.unit_induk_id, from_version_id: dataset.active_version_id, to_version_id: session.dataset_version_id, from_run_id: previousRun.id, to_run_id: runId, summary: asJson({ counts: kinds, before: summarize(before, beforeValues), after: summarize(rows, values) }), created_by: actor.userId }]);
   for (let offset = 0; offset < changes.length; offset += 1000) await deps.insert("asset_version_changes", changes.slice(offset, offset + 1000));
   return { baseVersionId: dataset.active_version_id, comparisonId };
@@ -121,7 +110,8 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   if (!unit) throw new ImportError("REFERENCE_UNAVAILABLE");
   const runId = deps.id(), rowIds = parsed.rows.map(() => deps.id());
   const assets: ComparableAsset[] = parsed.rows.map((row, index) => ({ ...row.asset, id: rowIds[index], provenance: row.provenance, coordinates: references.coordinateFor(row.asset) }));
-  const context = { asOf, rules: references.rules, aliases: references.aliases, candidates: [...assets, ...references.donors], cohort: [...assets, ...references.donors] };
+  const candidates = [...assets, ...references.donors], pool = prepareComparablePool(candidates);
+  const context = { asOf, rules: references.rules, aliases: references.aliases, candidates, cohort: candidates, candidatePool: pool, cohortPool: pool };
   // Two distinct representatives suffice to detect every identity conflict,
   // without rescanning the entire workbook once per source row.
   const identityFields: (keyof CanonicalAssetInput)[] = ["unitInduk", "upt", "namaGi", "bayPenghantar", "tid", "namaPeralatan", "spesifikasiMara", "satuan"];

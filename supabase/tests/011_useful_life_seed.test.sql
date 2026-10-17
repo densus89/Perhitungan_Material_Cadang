@@ -1,0 +1,11 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select is((select count(*) from public.useful_life_rules where rule_version='PERDIR-0299-2016-verified-subset-v1'),8::bigint,'The eight verified source rows are available to real processing');
+select is((select useful_life_years from public.useful_life_rules where rule_version='PERDIR-0299-2016-verified-subset-v1' and function_code='TRANS' and class_code='10600' and type_code='07' and subtype_code='102'),40::numeric,'Verified transmission transformer life is 40 years');
+select is((select useful_life_years from public.useful_life_rules where rule_version='PERDIR-0299-2016-verified-subset-v1' and class_code='11100'),25::numeric,'Verified distribution transformer life is 25 years');
+select is((select count(*) from public.useful_life_rules where rule_version='PERDIR-0299-2016-verified-subset-v1' and effective_from='2016-01-01' and source_hash='ed686bc369ff09923bc77b9e295f02d296c646a388a2def3248acd12474b500f'),8::bigint,'All seeds retain the original verified PDF hash and effective date');
+select ok(not exists(select 1 from public.asset_class_mappings where approval_evidence like '%Task 8 automatic%'),'Source seeding does not invent approved equipment aliases');
+select * from finish();
+rollback;

@@ -1368,6 +1368,15 @@ export type Database = {
         }
         Returns: string
       }
+      replace_gi_location_reference: {
+        Args: {
+          p_actor_id: string
+          p_rows: Json
+          p_source_hash: string
+          p_source_version: string
+        }
+        Returns: Json
+      }
       reserve_asset_import_run: {
         Args: {
           p_actor_id: string

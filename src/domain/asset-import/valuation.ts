@@ -1,12 +1,14 @@
 import { PERDIR_0299_VERSION } from "../../reference/useful-life-perdir-0299";
 import type { CanonicalizedAssetRow, ValuationSource } from "./types";
-import { imputeAssetAge, isNonnegativeNumber, priceDateWarnings, rankComparableCandidates, type AgeResolution, type ComparableAsset, type ComparableOptions, type ComparableSelection } from "./comparables";
+import { imputeAssetAge, isNonnegativeNumber, priceDateWarnings, rankComparableCandidates, type AgeResolution, type ComparableAsset, type ComparableOptions, type ComparableSelection, type PreparedComparablePool } from "./comparables";
 import { resolveUsefulLife, type UsefulLifeResolution } from "./useful-life";
 
 export interface ValuationContext extends ComparableOptions {
   asOf: string;
   candidates?: readonly ComparableAsset[];
   cohort?: readonly ComparableAsset[];
+  candidatePool?: PreparedComparablePool;
+  cohortPool?: PreparedComparablePool;
 }
 export interface ValuationResolution {
   nilaiABC: number | null;
@@ -37,7 +39,7 @@ export function resolveAssetValuation(input: ComparableAsset | CanonicalizedAsse
   const row = "asset" in input ? input : null;
   const asset: ComparableAsset = row ? { ...row.asset, provenance: row.provenance } : input as ComparableAsset;
   const usefulLife = resolveUsefulLife(asset, context);
-  const age = imputeAssetAge(asset, context.cohort ?? [], context);
+  const age = imputeAssetAge(asset, context.cohort ?? [], { ...context, preparedPool: context.cohortPool });
   const evidence: ValuationResolution["evidence"] = {
     ruleVersion: usefulLife.rule?.ruleVersion ?? PERDIR_0299_VERSION, calculatedAt: context.asOf, sourceField: null, sourceCell: null,
     referencePrice: null, priceDate: null, ageYears: age.years, usefulLifeYears: usefulLife.years, rule: usefulLife.rule, age, comparables: null,
@@ -64,7 +66,7 @@ export function resolveAssetValuation(input: ComparableAsset | CanonicalizedAsse
     referencePrice = asset.hargaPengadaanSaatIni;
     warnings.push(...dateWarnings);
   } else {
-    const comparables = rankComparableCandidates(asset, context.candidates ?? [], context);
+    const comparables = rankComparableCandidates(asset, context.candidates ?? [], { ...context, preparedPool: context.candidatePool });
     evidence.comparables = comparables;
     if (comparables.median === null || comparables.tier === null) return unresolved();
     referencePrice = comparables.median;

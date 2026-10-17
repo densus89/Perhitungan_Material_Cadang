@@ -4,6 +4,14 @@ import { normalizeHeader } from "../../src/domain/asset-import/normalize-header"
 import { assetRow, gridFixture, headers } from "../fixtures/asset-workbooks";
 
 describe("adaptive asset layout detection", () => {
+  it("proposes literal legacy quantity and SAP-adjustment headers while leaving missing owner/condition for correction", () => {
+    const layout = detectWorkbookLayout({ sheets: [{ name: "3400", rows: [["UPT", "NAMAGI", "MARA", "NO ASSET", "GROUP_NAME", "quantity", "satuan", "nilai_buku_SAP", "USIA ASET", "HARGA PENGADAAN SAAT INI", "nilai_buku_SAP_penyesuaian", "nilai_buku_SAP_FINAL"], ["SYNTHETIC UPT", "SYNTHETIC GI", "150/20 kV", "00001", "TRAFO", 1, "UNIT", null, 10, 400, 300, 999]] }] });
+    expect(layout.selected?.columns[5].field).toBe("jumlah");
+    expect(layout.selected?.columns[10].field).toBe("nilaiAbcInput");
+    expect(layout.selected?.columns[11].field).toBeNull();
+    expect(layout.selected?.missingRequiredFields).toEqual(["unitInduk", "kondisiAset"]);
+    expect(layout.requiresConfirmation).toBe(true);
+  });
   it("normalizes case, punctuation, underscores and multiline whitespace", () => {
     expect(normalizeHeader("  Nilai_buku\nSAP. ")).toBe("NILAI BUKU SAP");
     expect(normalizeHeader(null)).toBe("");

@@ -16,6 +16,17 @@ async function prepared(rows?: unknown[][], labels?: string[]) {
   return f;
 }
 describe("authoritative workbook processing", () => {
+  it("keeps an RST return blocked until a later complete run is ready, then enables resubmission", async () => {
+    const f = await prepared(); await processStoredWorkbook(actor, f.created.importId, f.deps);
+    f.tables.dataset_versions[0].status = "NEEDS_FIX";
+    f.tables.dataset_versions[0].updated_at = "2026-10-16T01:00:00.000Z";
+    expect((await loadAssetImport(actor, f.created.importId, f.deps)).stage).toBe("NEEDS_FIX");
+    f.deps.now = () => "2026-10-16T02:00:00.000Z";
+    const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(result.stage).toBe("READY_TO_SUBMIT");
+    expect((await submitAssetVersion(actor, f.created.importId, f.deps)).stage).toBe("PENDING_RST");
+    expect(f.tables.datasets[0].active_version_id ?? null).toBeNull();
+  });
   it("serializes PostgreSQL JSONB field ordering and numeric evidence", () => {
     expect(postgresJsonb({ zzz: 1e-7, b: ["a", 1e21], aa: { z: 0, a: true } })).toBe('{"b": ["a", 1000000000000000000000], "aa": {"a": true, "z": 0}, "zzz": 0.0000001}');
     expect(persistedRecordHashes([], [])).toEqual({ rowsHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", valuationsHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" });

@@ -5,6 +5,14 @@ import { actor } from "../import/fakes";
 import { reviewId } from "../../fixtures/asset-version-review";
 import { readFixture, side, unit, fromRun, comparisonId } from "./review-read-fixture";
 vi.mock("server-only", () => ({}));
+it("keeps the first-snapshot ADDED summary at the complete persisted run count when row filters narrow the page", async () => {
+  const f = readFixture(); Object.assign(f.state.expected, { baseVersionId: null, comparisonId: null });
+  f.state.summary = { rowCount: 141105 };
+  f.tables.asset_snapshot_rows = [side("one-filter-match", reviewId, 0)];
+  const detail = await createReviewDependencies(f.client as never).read(reviewId, { offset: 0, filter: "ALL", condition: "P0" });
+  expect(detail.totalRows).toBe(1);
+  expect(detail.comparison).toEqual({ counts: { ADDED: 141105 } });
+});
 it("pages actual ADDED rows for a first snapshot without inventing a comparison record", async () => {
   const f = readFixture(); Object.assign(f.state.expected, { baseVersionId: null, comparisonId: null }); f.tables.asset_snapshot_rows = [side("new", reviewId, 345)];
   const page = await createReviewDependencies(f.client as never).comparison(reviewId, { offset: 0, kind: "ADDED" });

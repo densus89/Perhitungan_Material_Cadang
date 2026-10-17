@@ -116,7 +116,8 @@ export function createReviewDependencies(client: SupabaseClient<Database>): Revi
         client.from("approval_events").select("action,notes,actor_id,created_at").eq("dataset_version_id", versionId).order("created_at", { ascending: false }).limit(100),
         client.from("audit_events").select("action,details,created_at").eq("target_type", "dataset_version").eq("target_id", versionId).order("created_at", { ascending: false }).limit(100), context.runId ? rows(context.runId, context.unitId, filters) : { data: [], count: 0 }]);
       check(approval.error); check(audit.error);
-      let comparison: Json = { counts: { ADDED: page.count } };
+      const completeCount = object(context.summary).rowCount;
+      let comparison: Json = { counts: { ADDED: typeof completeCount === "number" ? completeCount : 0 } };
       if (!("kind" in context.expected) && context.expected.comparisonId) { const result = await client.from("version_comparisons").select("summary").eq("id", context.expected.comparisonId).eq("unit_induk_id", context.unitId).single(); check(result.error); comparison = result.data?.summary ?? {}; }
       return { ...context, mapping: { ...context.mapping, ...mapping }, comparison, approvals: approval.data ?? [], audit: audit.data ?? [], rows: page.data.map(({ asset_valuations, ...row }) => { if (asset_valuations.length !== 1) throw new ReviewError("REVIEW_UNAVAILABLE", 503); return { ...safeSide(row, asset_valuations[0]), change: null }; }), totalRows: page.count, offset: filters.offset, hasMore: filters.offset + page.data.length < page.count };
     },

@@ -2,7 +2,7 @@
 
 Aplikasi Next.js untuk fondasi autentikasi, otorisasi, dan mockup perencanaan material cadang. Supabase menyediakan Auth, PostgreSQL, dan Row Level Security; Vercel menjalankan aplikasi secara dinamis.
 
-Tahap ini sudah menyediakan akun invite-only, peran dan penugasan Unit Induk, halaman administrasi DIV RST, sesi server, serta pengujian RLS. Modul impor, RFQ, ABC, inventory policy, prioritas lokasi, dan ekspor masih menggunakan **Data Demo** dan belum membaca spreadsheet operasional.
+Tahap ini menyediakan akun invite-only, penugasan Unit Induk, dan alur impor snapshot aset persisten: template, preview Worker, upload privat, pemetaan, valuasi teraudit, resume draft, pengajuan dan aktivasi DIV RST dengan histori. RFQ, mesin klasifikasi ABC, inventory policy, prioritas lokasi, dan ekspor perhitungan masih memakai **Data Demo**.
 
 ## Menjalankan lokal
 
@@ -29,25 +29,28 @@ pnpm test
 pnpm db:test
 pnpm db:lint
 pnpm lint
+pnpm exec tsc --noEmit
 pnpm build
 pnpm test:e2e
+pnpm bench:asset-import
 ```
 
 `pnpm db:test` menjalankan seluruh pgTAP pada proyek development Supabase yang tertaut melalui Management API. Jangan menjalankan `db reset --linked` pada proyek yang bukan disposable.
 
-Playwright menjalankan aplikasi dinamis melalui `pnpm dev` secara lokal atau `pnpm start` di CI. E2E membutuhkan empat variabel aplikasi di atas ditambah `E2E_TEST_PASSWORD` dan konfirmasi literal `E2E_CONFIRM_SYNTHETIC_DEV_PROJECT=yes-delete-synthetic-users`. Setup hanya boleh membuat dua akun `*.synthetic@pln.co.id` bertanda khusus dan teardown hanya menghapus identitas persis tersebut. Gunakan `E2E_BASE_URL` untuk menguji deployment eksternal.
+Playwright menjalankan aplikasi dinamis melalui `pnpm dev` secara lokal atau `pnpm start` di CI setelah build selesai. E2E membutuhkan empat variabel aplikasi di atas ditambah `E2E_TEST_PASSWORD` dan konfirmasi literal `E2E_CONFIRM_SYNTHETIC_DEV_PROJECT=yes-delete-synthetic-users`. Suite autentikasi memakai dua akun exact `*.synthetic@pln.co.id`; suite impor menambahkan tiga akun dan dua unit sintetis ber-ID unik. Cleanup memverifikasi marker dan hanya menghapus resource exact tersebut. Gunakan `E2E_BASE_URL` untuk menguji preview development, bukan database production operasional. Jalankan benchmark terpisah dari suite browser/UI.
 
 ## Dokumen
 
 - [Desain persistensi dan akses](docs/superpowers/specs/2026-10-13-persistent-data-and-access-design.md)
 - [Rencana fondasi Supabase dan autentikasi](docs/superpowers/plans/2026-10-13-supabase-foundation-auth.md)
 - [Panduan operasi Supabase](docs/operations/supabase-setup.md)
+- [Runbook impor, referensi GI dan pemulihan](docs/operations/asset-import-runbook.md)
 
 ## Batas privasi dan fase
 
-Service/secret key tidak boleh masuk browser, Git, log, atau tangkapan layar. File spreadsheet, kredensial, dan dokumen internal diabaikan oleh Git. Data demo bersifat sintetis; keputusan approval dan impor demo masih berada di state browser dan tidak boleh dianggap sebagai data operasional tersimpan.
+Service/secret key tidak boleh masuk browser, Git, log, atau tangkapan layar. Workbook sumber berada pada bucket privat `source-files`; spreadsheet, kredensial, dan dokumen internal diabaikan Git. Preview browser bersifat pendahuluan; hasil server yang lengkap dan persetujuan DIV RST menentukan snapshot aktif. Pengajuan tidak menghapus atau mengganti versi aktif.
 
-Fase berikutnya akan menangani persistent import dan approval, kemudian engine RFQ/perhitungan, lalu hasil nasional dan operasi. Detail fase tersedia pada dokumen desain dan rencana.
+Fase berikutnya menangani normalisasi RFQ yang disetujui dan mesin ABC A1/A2/B1/B2/C. `nilaiABC` adalah nilai buku; harga pengadaan baru tetap terpisah untuk Optimum Spare A2/B1. Kelas C tetap diaudit tanpa alokasi. Impor hanya menerima `.xlsx` 1 byte–50 MiB. Perintah `pnpm reference:gi` wajib dry-run, hash, dan aktor admin RST eksplisit sebelum konfirmasi.
 
 ## Deployment
 

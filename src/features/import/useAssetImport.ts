@@ -56,8 +56,8 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   function restoreMapping(selectedFile = file) {
     setMapping(snapshot?.file === selectedFile ? snapshot.mapping : null);
   }
-  function beginAuthoritativeTransition() {
-    authorityGeneration.current++; cancelPreview(); restoreMapping(); setConfirmed(false);
+  function beginAuthoritativeTransition(preserveMapping = true) {
+    authorityGeneration.current++; cancelPreview(); if (preserveMapping) restoreMapping(); setConfirmed(false);
   }
 
   function remember(next: ImportResponse, selectedFile = file, selectedUnit = unitId) {
@@ -123,9 +123,9 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     } catch { if (current) await recover(current.importId); else setError("Draft belum dapat dipastikan. Muat ulang halaman dan periksa daftar draft sebelum membuat impor baru."); }
     finally { inFlight.current = false; setBusy(false); }
   }
-  async function refresh(id = response?.importId, nextFilter: ReviewFilter = filter, offset = 0, nextOptions: ImportReviewSearch = reviewOptions) {
+  async function refresh(id = response?.importId, nextFilter: ReviewFilter = filter, offset = 0, nextOptions: ImportReviewSearch = reviewOptions, preserveMapping = true) {
     if (!id || inFlight.current) return;
-    beginAuthoritativeTransition(); inFlight.current = true; setBusy(true); setError("");
+    beginAuthoritativeTransition(preserveMapping); inFlight.current = true; setBusy(true); setError("");
     try { const current = await api.load(id, nextFilter, offset, nextOptions); remember(current); setStep(stepFor(current)); setFilter(nextFilter); setReviewOptions(nextOptions); setMessage("Status draft tersimpan dimuat dari server."); }
     catch { setError("Status draft tidak dapat dimuat. Coba Periksa status saat koneksi tersedia."); }
     finally { inFlight.current = false; setBusy(false); }
@@ -133,7 +133,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   async function resume(draft: ImportDraft) {
     if (inFlight.current || !actorUnits.some(unit => unit.id === draft.unitId)) return;
     beginAuthoritativeTransition(); setResponse(null); setStep("source"); setMessage(""); setFile(null); setSnapshot(null); setMapping(null); setConfirmed(false); setAcknowledged(false); setUnitId(draft.unitId); setFilter("ALL");
-    await refresh(draft.importId, "ALL", 0, {});
+    await refresh(draft.importId, "ALL", 0, {}, false);
   }
   async function retry() {
     if (!response || inFlight.current || !["READY_TO_PROCESS", "FAILED", "NEEDS_FIX"].includes(response.stage)) return;

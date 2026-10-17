@@ -4,6 +4,11 @@ import { ImportQualityStep } from "../../src/features/import/ImportQualityStep";
 import { ImportComparisonStep } from "../../src/features/import/ImportComparisonStep";
 import { base } from "../fixtures/import-ui";
 const summary = { rowCount: 3, blockingErrors: 1, warningCount: 1, conditions: {}, valueSources: {}, issueCounts: { AGE_IMPUTED: 1 }, totalNilaiABC: 100 };
+it("explains the downstream five-class contract and keeps nilaiABC separate from new acquisition price", () => {
+  render(<ImportQualityStep summary={summary} filter="ALL" onFilter={vi.fn()} acknowledged={false} onAcknowledge={vi.fn()} onNext={vi.fn()} onPage={vi.fn()} disabled={false} />);
+  expect(screen.getByText(/nilaiABC adalah nilai buku/)).toHaveTextContent(/Harga pengadaan.*terpisah.*Optimum Spare.*A2.*B1/);
+  expect(screen.getByText(/A1, A2, B1, B2, dan C/)).toHaveTextContent(/C.*tanpa alokasi/);
+});
 const review = { totalRows: 3, offset: 0, hasMore: false, rows: [{ rowNumber: 2, equipment: "Actual zero", errors: [], warnings: [], value: 0, valueSource: "SAP_BOOK_VALUE", ageImputed: false, evidence: { donorCount: 0 } }, { rowNumber: 3, equipment: "Estimated", errors: [], warnings: ["AGE_IMPUTED"], value: 100, valueSource: "ESTIMATED_SAME_GI", ageImputed: true, evidence: { donorCount: 3, tier: "SAME_GI", referencePrice: 200 } }, { rowNumber: 4, equipment: "Bad formula", errors: ["FORMULA_ERROR"], warnings: [], value: null, valueSource: "UNRESOLVED", ageImputed: false, evidence: { donorCount: 0 } }] };
 it("filters authoritative errors/warnings, preserves actual zero and presents sanitized donor evidence", () => {
   const change = vi.fn(); render(<ImportQualityStep summary={summary} review={review} filter="ALL" onFilter={change} acknowledged={false} onAcknowledge={vi.fn()} onNext={vi.fn()} onPage={vi.fn()} disabled={false} />);

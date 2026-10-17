@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Actor } from "../../domain/access";
 import { createImportSchema, importIdSchema, saveMappingSchema, sheetMappingSchema, XLSX_MIME, importSummarySchema, type ImportResponse } from "../../domain/asset-import/schemas";
 import { normalizeHeader } from "../../domain/asset-import/normalize-header";
-import { readAssetWorkbook } from "../../lib/spreadsheet/read-asset-workbook";
+import { readNodeAssetWorkbook as readAssetWorkbook } from "./read-node-workbook";
 import type { AssetSheetMapping } from "../../domain/asset-import/types";
 import type { Json } from "../../lib/supabase/database.types";
 import type { ImportDependencies, Row } from "./dependencies";
@@ -114,7 +114,10 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
   if (currentMatches) stage = "READY_TO_SUBMIT";
   if (latest?.status === "FAILED") stage = "FAILED";
   if (runs.some((run) => run.status === "PROCESSING")) stage = "PROCESSING";
-  if (["PENDING_RST", "ACTIVE", "HISTORICAL", "NEEDS_FIX"].includes(version.status)) stage = version.status as ImportResponse["stage"];
+  if (["PENDING_RST", "ACTIVE", "HISTORICAL"].includes(version.status)) stage = version.status as ImportResponse["stage"];
+  // A returned version remains blocked until a later finalized run is ready.
+  // The relational version status stays NEEDS_FIX until the audited submit RPC.
+  if (version.status === "NEEDS_FIX" && !(currentMatches && current && Date.parse(current.created_at) > Date.parse(version.updated_at))) stage = "NEEDS_FIX";
   const result: ImportResponse = { importId, datasetId: session.dataset_id, versionId: version.id, stage };
   result.source = { unitId: session.unit_induk_id, fileName: source.original_name, byteSize: source.byte_size, sha256: source.sha256 };
   if (typeof diagnostics?.ruleVersion === "string") result.ruleVersion = diagnostics.ruleVersion;

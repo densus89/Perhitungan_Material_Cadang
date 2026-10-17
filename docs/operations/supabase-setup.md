@@ -1,6 +1,6 @@
 # Operasi Supabase dan Deployment
 
-Panduan ini berlaku untuk fondasi autentikasi fase 1. Gunakan proyek Supabase development terpisah; jangan menaruh project ref, password database, access token, atau API key nyata dalam Git.
+Panduan ini berlaku untuk autentikasi dan snapshot aset persisten. Gunakan proyek Supabase development terpisah; jangan menaruh project ref, password database, access token, atau API key nyata dalam Git. Alur sumber privat, referensi GI, pemetaan, retry, dan aktivasi dijelaskan pada [runbook impor](asset-import-runbook.md).
 
 ## 1. Membuat dan menautkan proyek
 
@@ -113,4 +113,8 @@ Jika jaringan kantor memblokir `*.vercel.app`, verifikasi melalui jaringan lain 
 - Bila admin kehilangan autentikator: operator Supabase yang berwenang memverifikasi identitas pemilik, menghapus faktor MFA akun tersebut melalui Auth Admin, lalu meminta admin enrollment ulang. Penghapusan faktor mengakhiri sesi aktif; catat tindakan sebagai insiden operasional sampai UI recovery khusus tersedia.
 - Bila Free tier mendekati batas: review database/storage/egress dan upgrade secara sadar; jangan menghapus histori otomatis.
 
-Fase 1 tidak mempersistensikan isi spreadsheet, keputusan RFQ demo, hasil ABC/policy demo, atau prioritas lokasi demo. Persistent import/approval, engine RFQ/perhitungan, dan hasil nasional merupakan fase terpisah.
+Snapshot aset dan approval dipersistensikan. Keputusan RFQ demo, hasil ABC/policy demo, dan prioritas lokasi demo tetap terpisah dari snapshot aktif. Jangan menghapus versi aktif/histori untuk mengosongkan ruang. Perubahan aturan menghasilkan versi baru untuk review.
+
+Migrasi GI menambahkan RPC service-only `replace_gi_location_reference`, mencabut direct write master, dan mengaudit replacement secara atomik. Gunakan aktor admin RST aktif dan dry-run CSV sesuai runbook. Semua perubahan schema berikutnya harus berupa migrasi maju; jangan mengubah migrasi yang sudah diterapkan.
+
+Suite aset hosted menggunakan tiga akun dan dua unit sintetis ber-ID unik, selain dua akun exact suite autentikasi. Cleanup memverifikasi kode unit, UUID, email, marker dan run ID, menghapus objek sumber yang tepat, lalu membersihkan data sintetis lewat transaksi koneksi development khusus dan menghapus user terkait. Laporan/log fixture dan workbook tidak boleh dipublikasikan. Jika cleanup gagal, pertahankan ID run dan lakukan recovery hanya pada resource exact tersebut.

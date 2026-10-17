@@ -30,6 +30,7 @@ export interface AgeResolution {
   manualApprovalRequired: boolean; rejectedDonors: RejectedDonorEvidence[]; warnings: string[];
 }
 export interface ComparableOptions extends Partial<UsefulLifeOptions> {
+  preparedPool?: PreparedComparablePool;
   /** Audited MVP review thresholds, not PERDIR requirements. */
   minimumRemainingLifeFactor?: number;
   highDispersionThreshold?: number;
@@ -75,6 +76,32 @@ function deduplicateDonors(donors: readonly ComparableAsset[]) {
   const rejectedDonors: RejectedDonorEvidence[] = [...conflicts].sort().map((id) => ({ id, code: "DONOR_ID_CONFLICT" }));
   const unique = [...records].filter(([id]) => !conflicts.has(id)).sort(([a], [b]) => a.localeCompare(b)).map(([, record]) => record.asset);
   return { unique, rejectedDonors, warnings: rejectedDonors.length ? ["DONOR_ID_CONFLICT"] : [] };
+}
+export interface PreparedComparablePool {
+  forTarget(target: ComparableAsset): readonly ComparableAsset[];
+  rejectedDonors: RejectedDonorEvidence[];
+  warnings: string[];
+}
+/** Build once per immutable processing run. Conflicts are removed globally
+ * before indexing, so a conflicting ID cannot reappear through another spec. */
+export function prepareComparablePool(donors: readonly ComparableAsset[]): PreparedComparablePool {
+  const { unique, rejectedDonors, warnings } = deduplicateDonors(donors);
+  const specifications = new Map<string, ComparableAsset[]>(), groups = new Map<string, ComparableAsset[]>();
+  const prefix = (asset: ComparableAsset) => [normalizeAssetText(asset.namaPeralatan), normalizeAssetText(asset.satuan)];
+  const specificationKey = (asset: ComparableAsset) => JSON.stringify([...prefix(asset), normalizeAssetText(asset.normalizedSpecification ?? asset.spesifikasiMara)]);
+  const append = (map: Map<string, ComparableAsset[]>, key: string, asset: ComparableAsset) => { const entries = map.get(key) ?? []; entries.push(asset); map.set(key, entries); };
+  for (const asset of unique) {
+    append(specifications, specificationKey(asset), asset);
+    if (asset.approvedRfqGroup?.id) append(groups, JSON.stringify([...prefix(asset), asset.approvedRfqGroup.id]), asset);
+  }
+  return { rejectedDonors, warnings, forTarget(target) {
+    const exact = specifications.get(specificationKey(target)) ?? [];
+    const rfq = target.approvedRfqGroup?.id ? groups.get(JSON.stringify([...prefix(target), target.approvedRfqGroup.id])) ?? [] : [];
+    return rfq.length ? [...new Set([...exact, ...rfq])].sort((a, b) => assetEvidenceId(a)!.localeCompare(assetEvidenceId(b)!)) : exact;
+  } };
+}
+function donorPool(target: ComparableAsset, donors: readonly ComparableAsset[], options: ComparableOptions) {
+  return options.preparedPool ? { unique: options.preparedPool.forTarget(target), rejectedDonors: options.preparedPool.rejectedDonors, warnings: options.preparedPool.warnings } : deduplicateDonors(donors);
 }
 function same(a: string | null, b: string | null): boolean {
   return !!normalizeAssetText(a) && normalizeAssetText(a) === normalizeAssetText(b);
@@ -129,7 +156,7 @@ export function imputeAssetAge(target: ComparableAsset, cohort: readonly Compara
   if (known.years !== null) return { ...known, tier: null, donorIds: [], cohort: [], manualApprovalRequired: false, rejectedDonors: [], warnings: [] };
   // Invalid supplied age/date is not an absent age eligible for automatic imputation.
   if (target.tanggalOperasi || target.usiaAsetTahun !== null) return { ...known, tier: null, donorIds: [], cohort: [], manualApprovalRequired: true, rejectedDonors: [], warnings: [] };
-  const deduplicated = deduplicateDonors(cohort);
+  const deduplicated = donorPool(target, cohort, options);
   const candidates = deduplicated.unique.flatMap((donor) => {
     const id = assetEvidenceId(donor), age = knownAssetAge(donor, options.asOf);
     return donor !== target && id && id !== assetEvidenceId(target) && age.years !== null && compatibility(target, donor, options.asOf) ? [{ id, years: age.years, tier: locationTier(target, donor), provenance: donor.provenance ?? null }] : [];
@@ -148,7 +175,7 @@ export function priceDateWarnings(date: string | null, asOf?: string, stalePrice
   return [];
 }
 export function rankComparableCandidates(target: ComparableAsset, candidates: readonly ComparableAsset[], options: ComparableOptions = {}): ComparableSelection {
-  const deduplicated = deduplicateDonors(candidates);
+  const deduplicated = donorPool(target, candidates, options);
   const eligible = deduplicated.unique.flatMap((donor) => {
     const id = assetEvidenceId(donor), match = compatibility(target, donor, options.asOf);
     if (donor === target || !id || id === assetEvidenceId(target) || !match) return [];

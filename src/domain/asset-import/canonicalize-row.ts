@@ -22,7 +22,11 @@ export function canonicalizeAssetRow(row: readonly unknown[], mapping: AssetShee
     const rawValue = row[column.columnIndex - 1] ?? null;
     const scalar = readCellScalar(rawValue);
     const address = `${columnLetter(column.columnIndex)}${provenance.rowNumber}`;
-    sources[field.key] = { ...provenance, columnIndex: column.columnIndex, address, rawValue, ...(scalar.formula === undefined ? {} : { formula: scalar.formula }) };
+    // Adapters differ in how they expose invalid/missing cached formula results.
+    // Keep formula/address and the explicit invalid-cache state reproducible;
+    // the private original workbook retains the exact error token for audit.
+    const evidenceValue = scalar.formula !== undefined && scalar.issue ? { formula: scalar.formula, cacheStatus: "INVALID_OR_MISSING" } : rawValue;
+    sources[field.key] = { ...provenance, columnIndex: column.columnIndex, address, rawValue: evidenceValue, ...(scalar.formula === undefined ? {} : { formula: scalar.formula }) };
     const issue = (code: string) => issues.push({ code, severity: "ERROR", message: `Invalid ${field.header} at ${address}`, field: field.key, address });
     if (scalar.issue) { issue(scalar.issue); continue; }
     const value = scalar.value;

@@ -91,7 +91,11 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     const scratch = ".superpowers/sdd/2026-10-12-material-cadang-mockup-v1/visual-qa";
     for (const route of ["ringkasan", "impor", "pemetaan-rfq", "analisis-abc", "inventory-policy", "prioritas-lokasi", "ekspor"]) {
       await page.goto(`/${route}/`);
-      await expect(page.getByText("Data Demo", { exact: true })).toBeVisible();
+      if (route === "impor") {
+        await expect(page.getByRole("heading", { level: 1, name: "Impor & kualitas data" })).toBeVisible();
+        await expect(page.getByLabel("Berkas snapshot XLSX")).toBeVisible();
+        await expect(page.getByText("Data Demo", { exact: true })).toHaveCount(0);
+      } else await expect(page.getByText("Data Demo", { exact: true })).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       expect(await page.locator("body").innerText()).not.toMatch(/C:\\|D:\\|source-demo-|PRD\.md|SESSION_HANDOFF|\.superpowers|OPERASIONAL RAHASIA/);

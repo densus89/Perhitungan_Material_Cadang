@@ -8,6 +8,16 @@ vi.mock("../../src/lib/supabase/browser", () => ({ createBrowserSupabaseClient: 
 beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker); vi.stubGlobal("fetch", network.fetch); network.fetch.mockReset(); network.upload.mockReset().mockResolvedValue({ error: null }); });
 function selectFile(file = new File(["synthetic"], "snapshot.xlsx")) { fireEvent.change(screen.getByLabelText("Berkas snapshot XLSX"), { target: { files: [file] } }); }
 describe("persistent asset import", () => {
+  it("clears previous local mapping when resume cancels a preview and refreshes in the same render", async () => {
+    network.fetch.mockResolvedValue(Response.json({ ...base, stage: "MAPPING", layout: { ...mapping, sheetName: "NEW_DRAFT" } }));
+    const { result } = renderHook(() => useAssetImport([], units));
+    await act(async () => result.current.selectFile(new File(["synthetic"], "previous.xlsx")));
+    expect(result.current.mapping?.sheetName).toBe("DATA");
+    await act(async () => result.current.resume({ ...base, unitId: units[0].id, fileName: "next.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "MAPPING", rowCount: null }));
+    expect(result.current.preview).toBeNull();
+    expect(result.current.mapping).toBeNull();
+    expect(result.current.response?.layout?.sheetName).toBe("NEW_DRAFT");
+  });
   it.each(["column edit", "sheet switch", "parse error recovery"] as const)("keeps mapping and preview evidence atomic when status refresh cancels a %s", async scenario => {
     class DeferredWorker extends FakeWorker { postMessage = vi.fn(); }
     vi.stubGlobal("Worker", DeferredWorker);

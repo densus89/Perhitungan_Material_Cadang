@@ -10,7 +10,7 @@ export const CANONICAL_ASSET_FIELDS: readonly CanonicalAssetField[] = [
   { key: "noAset", header: "NO_ASET", requirement: "OPTIONAL", aliases: ["NO ASSET", "NO ASET"], format: "TEXT", description: "Identitas aset SAP atau operasional. Disarankan; simpan sebagai teks." },
   { key: "namaPeralatan", header: "NAMA_PERALATAN", requirement: "REQUIRED", aliases: ["GROUP_NAME", "NAMA PERALATAN"], format: "TEXT", description: "Keluarga atau nama peralatan." },
   { key: "spesifikasiMara", header: "SPESIFIKASI_MARA", requirement: "REQUIRED", aliases: ["MARA", "SPESIFIKASI"], format: "TEXT", description: "Spesifikasi asli peralatan; pertahankan rincian teknis sumber." },
-  { key: "jumlah", header: "JUMLAH", requirement: "REQUIRED", aliases: ["QTY", "JUMLAH ASET"], format: "NUMBER", description: "Kuantitas positif dengan satuan yang sesuai." },
+  { key: "jumlah", header: "JUMLAH", requirement: "REQUIRED", aliases: ["QTY", "QUANTITY", "JUMLAH ASET"], format: "NUMBER", description: "Kuantitas positif dengan satuan yang sesuai." },
   { key: "satuan", header: "SATUAN", requirement: "REQUIRED", aliases: ["UNIT", "UOM"], format: "UNIT", description: "Pilih satuan yang sesuai dari REFERENSI. Penambahan satuan memerlukan pemeriksaan kompatibilitas saat impor." },
   { key: "kondisiAset", header: "KONDISI_ASET", requirement: "REQUIRED", aliases: ["KONDISI", "KONDISI ASET"], format: "CONDITION", description: "P0 paling kritis, P4 paling baik. Kondisi tidak menentukan usia atau depresiasi." },
   { key: "tanggalOperasi", header: "TANGGAL_OPERASI", requirement: "OPTIONAL", aliases: ["TANGGAL OPERASI"], format: "DATE", description: "Disarankan sebagai sumber utama usia. Isi tanggal Excel yang valid." },
@@ -21,7 +21,7 @@ export const CANONICAL_ASSET_FIELDS: readonly CanonicalAssetField[] = [
   { key: "nilaiBukuSap", header: "NILAI_BUKU_SAP", requirement: "CONDITIONAL", aliases: ["nilai_buku_SAP", "NILAI BUKU SAP"], format: "MONEY", description: "Nilai buku SAP aktual dalam rupiah, prioritas utama valuasi. Nilai nol sah; kosong bukan nol." },
   { key: "hargaPengadaanSaatIni", header: "HARGA_PENGADAAN_SAAT_INI", requirement: "CONDITIONAL", aliases: ["HARGA PENGADAAN SAAT INI"], format: "MONEY", description: "Harga pengadaan baru/referensi dalam rupiah untuk Optimum Spare dan dasar estimasi terdepresiasi. Bukan nilai ABC langsung." },
   { key: "tanggalReferensiHarga", header: "TANGGAL_REFERENSI_HARGA", requirement: "CONDITIONAL", aliases: ["TANGGAL REFERENSI HARGA"], format: "DATE", description: "Tanggal dasar harga bila harga referensi diberikan." },
-  { key: "nilaiAbcInput", header: "NILAI_BUKU_PENYESUAIAN", requirement: "OPTIONAL", aliases: ["NILAI BUKU PENYESUAIAN"], format: "MONEY", description: "Nilai buku penyesuaian legacy dalam rupiah yang dapat dipertanggungjawabkan. Tetap diaudit, bukan hasil akhir sistem." },
+  { key: "nilaiAbcInput", header: "NILAI_BUKU_PENYESUAIAN", requirement: "OPTIONAL", aliases: ["NILAI BUKU PENYESUAIAN", "nilai_buku_SAP_penyesuaian"], format: "MONEY", description: "Nilai buku penyesuaian legacy dalam rupiah yang dapat dipertanggungjawabkan. Tetap diaudit, bukan hasil akhir sistem." },
   { key: "kodeMaterial", header: "KODE_MATERIAL", requirement: "OPTIONAL", aliases: ["KODE MATERIAL"], format: "TEXT", description: "Kode material bila tersedia; simpan sebagai teks." },
   { key: "keterangan", header: "KETERANGAN", requirement: "OPTIONAL", aliases: ["CATATAN"], format: "TEXT", description: "Catatan unit, termasuk dasar nilai penyesuaian bila diketahui." },
 ];

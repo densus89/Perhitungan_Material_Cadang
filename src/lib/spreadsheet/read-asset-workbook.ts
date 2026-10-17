@@ -13,6 +13,7 @@ export interface ReadAssetWorkbookOptions {
   collectRows?: boolean;
   batchSize?: number;
   onBatch?: (rows: CanonicalizedAssetRow[]) => void | Promise<void>;
+  onPhase?: (measurement: { phase: "workbookParse" | "canonicalization"; durationMs: number }) => void;
 }
 
 export interface ParsedAssetWorkbook {
@@ -30,18 +31,29 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export function assetCellValue(cell: ExcelJS.Cell): unknown {
+  const value = cell.value;
+  // ExcelJS 4.4 Cell.value omits falsy formula caches. Its public result
+  // accessor retains 0, which must remain a valid book value and asset age.
+  return cell.type === ExcelJS.ValueType.Formula && value && typeof value === "object" ? { ...value, result: cell.result } : value;
+}
 function rowValues(sheet: ExcelJS.Worksheet, rowNumber: number): unknown[] {
   const row = sheet.getRow(rowNumber);
-  return Array.from({ length: row.cellCount }, (_, index) => row.getCell(index + 1).value);
+  return Array.from({ length: row.cellCount }, (_, index) => assetCellValue(row.getCell(index + 1)));
 }
 
-function validateMapping(mapping: AssetSheetMapping, workbook: ExcelJS.Workbook): AssetSheetMapping {
-  const sheet = workbook.getWorksheet(mapping.sheetName);
+export interface WorkbookSheetData { name: string; rows: unknown[][]; rowCount: number; columnCount: number }
+export interface WorkbookRowAdapter {
+  sheets: WorkbookSheetData[];
+  rows(sheetName: string): AsyncIterable<{ rowNumber: number; values: unknown[] }>;
+}
+function validateMapping(mapping: AssetSheetMapping, sheets: WorkbookSheetData[]): AssetSheetMapping {
+  const sheet = sheets.find(sheet => sheet.name === mapping.sheetName);
   if (!sheet || !Number.isInteger(mapping.headerRow) || mapping.headerRow < 1 || mapping.headerRow > Math.min(50, sheet.rowCount)) throw new Error("Invalid confirmed mapping sheet/header");
   const indexes = new Set<number>();
   const fields = new Set<string>();
   for (const column of mapping.columns) {
-    if (!Number.isInteger(column.columnIndex) || column.columnIndex < 1 || column.columnIndex > sheet.columnCount || indexes.has(column.columnIndex) || normalizeHeader(readCellScalar(sheet.getCell(mapping.headerRow, column.columnIndex).value).value) !== column.normalizedHeader) throw new Error("Invalid confirmed mapping column");
+    if (!Number.isInteger(column.columnIndex) || column.columnIndex < 1 || column.columnIndex > sheet.columnCount || indexes.has(column.columnIndex) || normalizeHeader(readCellScalar(sheet.rows[mapping.headerRow - 1]?.[column.columnIndex - 1]).value) !== column.normalizedHeader) throw new Error("Invalid confirmed mapping column");
     indexes.add(column.columnIndex);
     if (!column.field) continue;
     if (!CANONICAL_ASSET_FIELDS.some((field) => field.key === column.field) || fields.has(column.field)) throw new Error("Invalid confirmed mapping field");
@@ -61,12 +73,25 @@ export async function readAssetWorkbook(bytes: Uint8Array | ArrayBuffer, options
   const batchSize = options.batchSize ?? 1000;
   if (!options.ruleVersion.trim() || !Number.isInteger(previewLimit) || previewLimit < 0 || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 1000) throw new Error("Invalid workbook reader options");
   const workbook = new ExcelJS.Workbook();
+  const parseStarted = performance.now();
   // An owned ArrayBuffer works in browsers and Node without a Buffer dependency.
   const buffer = (bytes instanceof Uint8Array ? bytes.slice() : new Uint8Array(bytes)).buffer;
   await workbook.xlsx.load(buffer);
-  const layout = detectWorkbookLayout({ sheets: workbook.worksheets.map((sheet) => ({ name: sheet.name, rows: Array.from({ length: Math.min(70, sheet.rowCount) }, (_, index) => rowValues(sheet, index + 1)) })) });
+  options.onPhase?.({ phase: "workbookParse", durationMs: performance.now() - parseStarted });
+  return canonicalizeWorkbookAdapter({
+    sheets: workbook.worksheets.map(sheet => ({ name: sheet.name, rows: Array.from({ length: Math.min(70, sheet.rowCount) }, (_, index) => rowValues(sheet, index + 1)), rowCount: sheet.rowCount, columnCount: sheet.columnCount })),
+    async *rows(sheetName) { const sheet = workbook.getWorksheet(sheetName)!; for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber++) { const values = rowValues(sheet, rowNumber); sheet.getRow(rowNumber).values = []; yield { rowNumber, values }; } },
+  }, options);
+}
+
+/** Both adapters use this one row, rejection and hash contract. */
+export async function canonicalizeWorkbookAdapter(adapter: WorkbookRowAdapter, options: ReadAssetWorkbookOptions): Promise<ParsedAssetWorkbook> {
+  const previewLimit = options.previewLimit ?? 100, batchSize = options.batchSize ?? 1000;
+  if (!options.ruleVersion.trim() || !Number.isInteger(previewLimit) || previewLimit < 0 || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 1000) throw new Error("Invalid workbook reader options");
+  const canonicalizationStarted = performance.now();
+  const layout = detectWorkbookLayout({ sheets: adapter.sheets });
   if (options.confirmedMapping) {
-    layout.selected = validateMapping(options.confirmedMapping, workbook);
+    layout.selected = validateMapping(options.confirmedMapping, adapter.sheets);
     layout.requiresConfirmation ||= layout.selected.missingRequiredFields.length > 0;
   }
   const mapping = layout.selected;
@@ -83,9 +108,9 @@ export async function readAssetWorkbook(bytes: Uint8Array | ArrayBuffer, options
     hashChunk = [];
   };
   if (mapping && (options.confirmedMapping || !layout.requiresConfirmation)) {
-    const sheet = workbook.getWorksheet(mapping.sheetName)!;
-    for (let rowNumber = mapping.headerRow + 1; rowNumber <= sheet.rowCount; rowNumber++) {
-      const row = canonicalizeAssetRow(rowValues(sheet, rowNumber), mapping, { sheetName: sheet.name, rowNumber });
+    for await (const { rowNumber, values } of adapter.rows(mapping.sheetName)) {
+      if (rowNumber <= mapping.headerRow) continue;
+      const row = canonicalizeAssetRow(values, mapping, { sheetName: mapping.sheetName, rowNumber });
       if (!row.candidate) {
         summary.rejectedRows++;
         const reason = row.rejectionReason!;
@@ -107,5 +132,6 @@ export async function readAssetWorkbook(bytes: Uint8Array | ArrayBuffer, options
   }
   await flushHash();
   const canonicalHash = await sha256(JSON.stringify({ chain, summary }));
+  options.onPhase?.({ phase: "canonicalization", durationMs: performance.now() - canonicalizationStarted });
   return { layout, layoutHash, canonicalHash, summary, preview, ...(rows ? { rows } : {}) };
 }
