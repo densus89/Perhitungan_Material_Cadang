@@ -100,6 +100,8 @@ async function persistComparison(actor: Actor, session: Row<"import_sessions">, 
   return { baseVersionId: dataset.active_version_id, comparisonId };
 }
 export async function processStoredWorkbook(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {
+  const processStarted = performance.now();
+  const phase = (name: string, rows?: number) => console.info("ASSET_IMPORT_PHASE " + JSON.stringify({ name, durationMs: Math.round(performance.now() - processStarted), ...(rows === undefined ? {} : { rows }) }));
   const { session, source, version } = await ownedImport(actor, importId, deps); assertEditable(version);
   if ((await deps.list("asset_import_runs", { import_session_id: session.id, status: "PROCESSING" })).length) throw new ImportError("CONFLICT");
   const sheet = (await deps.list("import_sheets", { import_session_id: session.id, unit_induk_id: session.unit_induk_id, selected: true }))[0];
@@ -109,9 +111,11 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   if (!diagnostics.success || diagnostics.data.uploadVerified !== source.sha256) throw new ImportError("NOT_READY");
   const bytes = await verifiedBytes(source, deps);
   const parsed = await readAssetWorkbook(bytes, { ruleVersion: diagnostics.data.ruleVersion, confirmedMapping: mapping, collectRows: true, previewLimit: 0, batchSize: 1000 });
+  phase("parsed", parsed.rows?.length);
   if (parsed.canonicalHash !== diagnostics.data.canonicalHash || parsed.layoutHash !== diagnostics.data.layoutHash || parsed.layoutHash !== sheet.layout_hash) throw new ImportError("PREVIEW_MISMATCH");
   if (!parsed.rows?.length) throw new ImportError("NOT_READY");
   const asOf = deps.now().slice(0, 10), references = await referenceContext(deps, diagnostics.data.ruleVersion, asOf);
+  phase("references", parsed.rows.length);
   const unit = (await deps.list("unit_induk", { id: session.unit_induk_id }))[0];
   if (!unit) throw new ImportError("REFERENCE_UNAVAILABLE");
   const runId = deps.id(), rowIds = parsed.rows.map(() => deps.id());
@@ -140,17 +144,22 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
     rows.push(persisted);
     values.push({ asset_row_id: persisted.id, import_run_id: runId, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, nilai_abc: valuation.nilaiABC, harga_pengadaan_saat_ini: valuation.hargaPengadaanSaatIni, value_source: valuation.valueSource, calculation_method: valuation.calculationMethod, age_status: valuation.ageStatus, age_years: valuation.evidence.ageYears, useful_life_years: valuation.usefulLife.years, useful_life_rule_id: valuation.usefulLife.rule?.id ?? null, rule_version: diagnostics.data.ruleVersion, as_of: asOf, manual_approval_required: validation.manualApprovalRequired, approved_by: null, approved_at: null, approval_notes: null, selected_donor_ids: valuation.evidence.comparables?.selectedDonorIds ?? [], donor_evidence: asJson({ ...(valuation.evidence.comparables ?? {}), coordinateVersions: references.coordinateVersions }), calculation_evidence: asJson(valuation.evidence), warning_codes: persisted.warning_codes, created_at: deps.now() });
   });
+  phase("valued", rows.length);
   const expected = persistedRecordHashes(rows, values);
+  phase("hashed", rows.length);
   // Atomic reservation rechecks revision and uniqueness after parsing/valuation.
   try { await deps.reserve(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: { id: runId, expected_row_count: rows.length, expected_valuation_count: values.length, source_hash: source.sha256, mapping_hash: parsed.layoutHash, rule_version: diagnostics.data.ruleVersion, expected_rows_hash: expected.rowsHash, expected_valuations_hash: expected.valuationsHash } }); }
   catch { throw new ImportError("CONFLICT"); }
+  phase("reserved", rows.length);
   try {
     await insertInWindows("asset_snapshot_rows", rows, deps);
     await insertInWindows("asset_valuations", values, deps);
+    phase("inserted", rows.length);
     // The COMPLETE transition trigger recomputes persisted counts and hashes
     // in the database transaction. Avoid returning and downloading hundreds
     // of megabytes only to repeat that authoritative reconciliation in Node.
     await deps.finalize(actor.userId, runId);
+    phase("finalized", rows.length);
   } catch {
     // Conditional update cannot rewrite a terminal run if finalization won a race.
     await deps.failRun(actor.userId, runId);
@@ -159,6 +168,7 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   try {
     const comparison = await persistComparison(actor, session, runId, rows, values, deps);
     await deps.sealComparison(actor.userId, runId, comparison.baseVersionId, comparison.comparisonId);
+    phase("compared", rows.length);
   } catch { throw new ImportError("COMPARISON_FAILED"); }
   return loadAssetImport(actor, importId, deps);
 }

@@ -121,7 +121,11 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
     },
     async finalize(actorId, runId) { const { error } = await client.rpc("finalize_asset_import_run", { p_actor_id: actorId, p_run_id: runId }); check(error); },
     async replaceMapping(actorId, input) { const { error } = await client.rpc("replace_asset_import_mapping", { p_actor_id: actorId, p_import_id: input.importId, p_sheet_id: input.sheetId, p_expected_revision: input.expectedRevision, p_mapping: input.mapping as unknown as Json, p_layout_hash: input.layoutHash, p_canonical_hash: input.canonicalHash, p_rule_version: input.ruleVersion, p_source_hash: input.sourceHash }); check(error); },
-    async reserve(actorId, input) { const { error } = await client.rpc("reserve_asset_import_run", { p_actor_id: actorId, p_import_id: input.importId, p_expected_revision: input.expectedRevision, p_run: input.run }); check(error); },
+    async reserve(actorId, input) {
+      const { error } = await client.rpc("reserve_asset_import_run", { p_actor_id: actorId, p_import_id: input.importId, p_expected_revision: input.expectedRevision, p_run: input.run });
+      if (error) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "reserve", code: error.code }));
+      check(error);
+    },
     async failRun(actorId, runId) { const { error } = await client.rpc("fail_asset_import_run", { p_actor_id: actorId, p_run_id: runId }); check(error); },
     async sealComparison(actorId, runId, baseVersionId, comparisonId) { const { error } = await client.rpc("complete_asset_import_comparison", { p_actor_id: actorId, p_run_id: runId, p_base_version_id: baseVersionId!, p_comparison_id: comparisonId! }); check(error); },
     async submit(actorId, versionId, expected) { const { error } = await client.rpc("submit_asset_version", { p_actor_id: actorId, p_version_id: versionId, p_expected_run_id: expected.runId, p_expected_mapping_revision: expected.mappingRevision, p_expected_layout_hash: expected.layoutHash, p_expected_base_version_id: expected.baseVersionId!, p_expected_comparison_id: expected.comparisonId! }); check(error); },
