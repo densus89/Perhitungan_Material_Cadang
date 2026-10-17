@@ -9,6 +9,7 @@ test("unauthenticated workspace access redirects to login", async ({ page }) => 
 });
 
 test("synthetic admin can sign in and open user administration", async ({ page }) => {
+  test.slow(Boolean(process.env.E2E_BASE_URL), "Hosted admin MFA enrollment includes multiple authenticated navigations");
   await loginAs(page, E2E_IDENTITIES.admin.email);
   await expect(page.getByRole("heading", { level: 1, name: "Ringkasan Perencanaan" })).toBeVisible();
   await page.getByRole("link", { name: "Kelola Pengguna" }).click();
