@@ -45,7 +45,7 @@ function storedAsset(row: Row<"asset_snapshot_rows">): ComparableAsset {
 async function insertInWindows<T extends "asset_snapshot_rows" | "asset_valuations">(table: T, records: Row<T>[], deps: ImportDependencies) {
   const batches = Array.from({ length: Math.ceil(records.length / 1000) }, (_, index) => records.slice(index * 1000, (index + 1) * 1000));
   for (let index = 0; index < batches.length; index += 8) {
-    await Promise.all(batches.slice(index, index + 8).map((batch) => deps.insert(table, batch)));
+    await Promise.all(batches.slice(index, index + 8).map((batch) => deps.insertBatch(table, batch)));
   }
 }
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {
@@ -147,9 +147,9 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   try {
     await insertInWindows("asset_snapshot_rows", rows, deps);
     await insertInWindows("asset_valuations", values, deps);
-    const storedRows = await deps.list("asset_snapshot_rows", { import_run_id: runId, unit_induk_id: session.unit_induk_id }), storedValues = await deps.list("asset_valuations", { import_run_id: runId, unit_induk_id: session.unit_induk_id });
-    const actual = persistedRecordHashes(storedRows, storedValues);
-    if (storedRows.length !== rows.length || storedValues.length !== values.length || actual.rowsHash !== expected.rowsHash || actual.valuationsHash !== expected.valuationsHash) throw new ImportError("PROCESS_FAILED");
+    // The COMPLETE transition trigger recomputes persisted counts and hashes
+    // in the database transaction. Avoid returning and downloading hundreds
+    // of megabytes only to repeat that authoritative reconciliation in Node.
     await deps.finalize(actor.userId, runId);
   } catch {
     // Conditional update cannot rewrite a terminal run if finalization won a race.

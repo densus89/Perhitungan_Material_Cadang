@@ -93,9 +93,13 @@ describe("authoritative workbook processing", () => {
     await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" });
   });
   it("detects incomplete persisted batches before finalization", async () => {
-    const f = await prepared(), insert = f.deps.insert;
-    f.deps.insert = async (table, rows) => { if (table === "asset_valuations") return [] as never; return insert(table, rows); };
-    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" }); expect(f.events).not.toContain("finalize"); expect(f.tables.asset_import_runs[0].status).toBe("FAILED");
+    const f = await prepared(), insertBatch = f.deps.insertBatch;
+    f.deps.insertBatch = async (table, rows) => { if (table !== "asset_valuations") await insertBatch(table, rows); };
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
+    expect(f.events).toContain("finalize");
+    expect(f.tables.asset_import_runs[0].status).toBe("FAILED");
+    expect(f.tables.import_sessions[0].current_run_id ?? null).toBeNull();
+    expect(f.tables.asset_import_run_metadata ?? []).toHaveLength(0);
   });
   it("rejects unavailable effective reference rules without creating a run", async () => {
     const f = await prepared(); f.tables.useful_life_rules = [];

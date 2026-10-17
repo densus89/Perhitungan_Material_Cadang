@@ -114,7 +114,9 @@ async function uploadAssetInput(page: Page, scenario: AssetScenario, input: stri
   const completed = page.waitForResponse(response => response.url().endsWith("/process/") && response.request().method() === "POST", { timeout: options.processTimeoutMs ?? 300000 });
   await page.getByRole("button", { name: "Unggah dan proses di server" }).click(); await requested; const started = Date.now();
   const response = await completed; scenario.processDurationsMs.push(Date.now() - started);
-  if (response.status() !== 200) { const body = await response.json(); throw new Error(`Synthetic processing failed with HTTP ${response.status()} (${typeof body.code === "string" && /^[A-Z_]+$/.test(body.code) ? body.code : "UNKNOWN"})`); }
+  // A timed-out streaming function can expose response headers while its body
+  // never completes. Fail on the status without extending cleanup by minutes.
+  if (response.status() !== 200) throw new Error(`Synthetic processing failed with HTTP ${response.status()}`);
   const result = await response.json() as ImportResponse;
   await uploadExpect(page.getByRole("heading", { name: "Kualitas & bukti nilai" })).toBeVisible();
   return result;

@@ -21,6 +21,7 @@ export interface ImportDependencies {
   now(): string;
   list<T extends ImportTable>(table: T, filters: Partial<Row<T>>): Promise<Row<T>[]>;
   insert<T extends ImportTable>(table: T, rows: Insert<T>[]): Promise<Row<T>[]>;
+  insertBatch<T extends "asset_snapshot_rows" | "asset_valuations" | "asset_version_changes">(table: T, rows: Insert<T>[]): Promise<void>;
   update<T extends ImportTable>(table: T, filters: Partial<Row<T>>, values: Database["public"]["Tables"][T]["Update"]): Promise<void>;
   remove<T extends ImportTable>(table: T, filters: Partial<Row<T>>): Promise<void>;
   sign(path: string): Promise<{ path: string; token: string }>;
@@ -96,6 +97,11 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       const { data, error } = await client.from(table).insert(rows as never).select(); check(error);
       if (data?.length !== rows.length) throw new Error("Incomplete import batch");
       return data as never;
+    },
+    async insertBatch(table, rows) {
+      if (!rows.length || rows.length > 1000) throw new Error("Invalid import batch");
+      const { error, count } = await client.from(table).insert(rows as never, { count: "exact" }); check(error);
+      if (count !== rows.length) throw new Error("Incomplete import batch");
     },
     async update(table, filters, values) { const { error } = await client.from(table).update(values as never).match(filters); check(error); },
     async remove(table, filters) { const { error } = await client.from(table).delete().match(filters); check(error); },

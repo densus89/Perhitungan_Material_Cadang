@@ -36,6 +36,7 @@ export function fakeDependencies() {
       (tables[table] ??= []).push(...values as unknown as Record<string, unknown>[]);
       return values as Row<T>[];
     },
+    async insertBatch(table, rows) { await deps.insert(table, rows); },
     async update(table, filters, values) {
       for (const row of tables[table] ?? []) if (matching(row, filters)) Object.assign(row, values);
     },
@@ -52,9 +53,10 @@ export function fakeDependencies() {
       const session = tables.import_sessions.find((row) => row.id === run.import_session_id)!;
       const sheet = tables.import_sheets.find((row) => row.import_session_id === session.id && row.selected)!;
       if (run.mapping_revision !== session.mapping_revision || sheet.layout_hash !== run.mapping_hash) throw new Error("Stale finalization");
+      const rows = tables.asset_snapshot_rows.filter((row) => row.import_run_id === runId), values = tables.asset_valuations.filter((row) => row.import_run_id === runId);
+      if (rows.length !== run.expected_row_count || values.length !== run.expected_valuation_count) throw new Error("Incomplete finalized import");
       Object.assign(run, { status: "COMPLETE", completed_at: deps.now() });
       session.current_run_id = runId;
-      const rows = tables.asset_snapshot_rows.filter((row) => row.import_run_id === runId), values = tables.asset_valuations.filter((row) => row.import_run_id === runId);
       const summary = { rowCount: rows.length, blockingErrors: 0, warningCount: 0, conditions: {} as Record<string, number>, valueSources: {} as Record<string, number>, issueCounts: {} as Record<string, number>, totalNilaiABC: 0 };
       const add = (target: Record<string, number>, key: unknown) => { target[String(key)] = (target[String(key)] ?? 0) + 1; };
       for (const row of rows) { summary.blockingErrors += (row.error_codes as string[]).length; summary.warningCount += (row.warning_codes as string[]).length; add(summary.conditions, row.kondisi_aset ?? "MISSING"); for (const code of [...row.error_codes as string[], ...row.warning_codes as string[]]) add(summary.issueCounts, code); }
