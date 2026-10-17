@@ -87,6 +87,7 @@ test("manual RFQ choices preserve material family and transformer capacity throu
 
 for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "narrow", width: 390, height: 844 }]) {
   test(`${viewport.name}: readable pages, filter emptiness, modal focus, and private QA captures`, async ({ page }) => {
+    test.slow(Boolean(process.env.E2E_BASE_URL), "Hosted visual journey includes twelve authenticated navigations");
     await page.setViewportSize(viewport);
     const scratch = ".superpowers/sdd/2026-10-12-material-cadang-mockup-v1/visual-qa";
     for (const route of ["ringkasan", "impor", "pemetaan-rfq", "analisis-abc", "inventory-policy", "prioritas-lokasi", "ekspor"]) {
