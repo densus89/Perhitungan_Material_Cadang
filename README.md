@@ -56,4 +56,4 @@ Fase berikutnya menangani normalisasi RFQ yang disetujui dan mesin ABC A1/A2/B1/
 
 Production: [perhitungan-material-cadang.vercel.app](https://perhitungan-material-cadang.vercel.app).
 
-Proyek Vercel memerlukan empat variabel aplikasi yang sama pada Development, Preview, dan Production. Lakukan preview dari commit yang telah direview, validasi login, lalu promosikan commit yang sama. Panduan lengkap, bootstrap, rotasi rahasia, dan pemulihan ada di [panduan operasi](docs/operations/supabase-setup.md).
+Proyek Vercel memerlukan empat nama variabel aplikasi yang sama pada Development, Preview, dan Production. Aktifkan system environment variables Vercel untuk preview: mutasi hanya menerima origin HTTPS exact dari `VERCEL_URL` saat `VERCEL=1` dan `VERCEL_ENV=preview`; production tetap memakai `NEXT_PUBLIC_SITE_URL` kanonis. Host/forwarding header dan alias preview lain tidak menjadi sumber kepercayaan. Lakukan preview dari commit yang telah direview, validasi login, lalu promosikan commit yang sama. Panduan lengkap, bootstrap, rotasi rahasia, dan pemulihan ada di [panduan operasi](docs/operations/supabase-setup.md).

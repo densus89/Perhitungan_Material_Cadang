@@ -1,7 +1,11 @@
-import { expect, type Page } from "@playwright/test";
+import { expect as baseExpect, type Page } from "@playwright/test";
 import { E2E_IDENTITIES, parseE2eEnvironment } from "./environment";
 import { createE2EAdminClient, resetSyntheticE2EAdminMfa } from "./users";
 import { createTotpCode } from "./totp";
+
+// Hosted auth navigates through / before the authorized workspace/MFA route.
+// Wait for that actual state; never sleep or retry the sign-in mutation.
+const expect = baseExpect.configure({ timeout: 30000 });
 
 export async function loginAs(page: Page, email: string): Promise<void> {
   if (!Object.values(E2E_IDENTITIES).some((identity) => identity.email === email)) {

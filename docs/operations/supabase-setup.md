@@ -97,13 +97,15 @@ Tes mencakup redirect tanpa sesi, enrollment TOTP dan login AAL2 admin, penolaka
 
 ## 7. Preview dan production Vercel
 
-1. Isi empat environment variables untuk Development, Preview, dan Production.
-2. Deploy preview dari commit yang telah direview.
+1. Isi empat environment variables untuk Development, Preview, dan Production. Pertahankan `NEXT_PUBLIC_SITE_URL` sebagai origin kanonis untuk link undangan/pemulihan dan proteksi mutasi production; jangan menggantinya dengan request Host.
+2. Aktifkan **Enable access to System Environment Variables** pada proyek Vercel, lalu deploy preview dari commit yang telah direview. Pada `VERCEL=1` + `VERCEL_ENV=preview`, proteksi mutasi import/review/admin memakai hanya `https://<VERCEL_URL>` exact (hostname deployment `*.vercel.app`, tanpa scheme/path/port pada nilai env). Nilai hilang/rusak ditolak; Host/`x-forwarded-host`, domain production, dan alias branch bukan fallback preview. Production/lokal tetap memakai origin kanonis yang dikonfigurasi. Lihat [kontrak system variables Vercel](https://vercel.com/docs/environment-variables/system-environment-variables).
 3. Validasi halaman login, redirect workspace, admin authorization, logout, callback yang diizinkan, dan tidak adanya secret pada client bundle/network response.
 4. Promosikan atau deploy **commit yang sama** ke production.
 5. Jalankan smoke/E2E terhadap production sesuai kebijakan; jangan menjalankan skenario destruktif synthetic-user pada database production yang berisi pengguna operasional.
 
 Jika jaringan kantor memblokir `*.vercel.app`, verifikasi melalui jaringan lain dan ajukan custom domain/allowlist sebagai pekerjaan operasional terpisah.
+
+Pengujian login menunggu URL akhir `/auth/mfa/` atau `/ringkasan/` sampai 30 detik, tanpa sleep/retry sign-in. Redirect antara melalui `/` belum merupakan kegagalan autentikasi. Periksa status mutasi pertama `/api/imports/` sebelum menyimpulkan rute `/process/` macet; penolakan 403 sebelum draft dibuat tidak pernah memulai proses 300 detik.
 
 ## 8. Pemulihan dan batas fase
 

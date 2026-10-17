@@ -6,6 +6,7 @@ import { createAdminSupabaseClient } from "../../lib/supabase/admin";
 import { createServerSupabaseClient } from "../../lib/supabase/server";
 import { ActorAccessError, requireActor } from "../auth/actor";
 import { createUserAdminDependencies, type AdminResult, type UserAdminDependencies } from "./user-service";
+import { hasTrustedMutationOrigin } from "../http/mutation-origin";
 
 function json(body: { code: string; message: string }, status: number) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store, max-age=0" } });
@@ -15,8 +16,7 @@ export async function adminMutation<T>(request: Request, schema: z.ZodType<T>, m
     const actor = await requireActor(await createServerSupabaseClient());
     if (actor.role !== "RST_ADMIN") return json({ code: "FORBIDDEN", message: "Akses administrasi DIV RST diperlukan." }, 403);
     const env = getServerEnv();
-    const origin = request.headers.get("origin");
-    if (origin && origin !== new URL(env.siteUrl).origin) return json({ code: "FORBIDDEN", message: "Asal permintaan tidak valid." }, 403);
+    if (!hasTrustedMutationOrigin(request)) return json({ code: "FORBIDDEN", message: "Asal permintaan tidak valid." }, 403);
     if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return json({ code: "INVALID_INPUT", message: "Gunakan permintaan JSON yang valid." }, 422);
     let body: unknown;
     try { body = await request.json(); } catch { return json({ code: "INVALID_INPUT", message: "Gunakan permintaan JSON yang valid." }, 422); }

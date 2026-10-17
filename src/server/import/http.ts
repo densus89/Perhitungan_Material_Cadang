@@ -7,6 +7,7 @@ import { createServerSupabaseClient } from "../../lib/supabase/server";
 import { requireActor, ActorAccessError } from "../auth/actor";
 import { createImportDependencies, type ImportDependencies } from "./dependencies";
 import { ImportError } from "./service";
+import { hasTrustedMutationOrigin } from "../http/mutation-origin";
 
 function json(body: unknown, status = 200) { return Response.json(body, { status, headers: { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" } }); }
 function denied(code: string, status: number) { return json({ code, message: "Permintaan impor tidak dapat diproses." }, status); }
@@ -28,8 +29,7 @@ async function scopeImport(context: Awaited<ReturnType<typeof actorContext>>, im
 export async function assetImportMutation<T>(request: Request, schema: z.ZodType<T>, handler: (actor: Actor, input: T, deps: ImportDependencies) => Promise<unknown>, extra?: { importId: string }) {
   try {
     const context = await actorContext();
-    const expectedOrigin = z.url().parse(process.env.NEXT_PUBLIC_SITE_URL);
-    if (request.headers.get("origin") !== new URL(expectedOrigin).origin || request.headers.get("sec-fetch-site") === "cross-site") return denied("FORBIDDEN", 403);
+    if (!hasTrustedMutationOrigin(request)) return denied("FORBIDDEN", 403);
     if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return denied("INVALID_INPUT", 422);
     // Mapping payloads are small; browser preview/raw workbook rows are never accepted.
     const raw = await request.text(); if (raw.length > 2 * 1024 * 1024) return denied("INVALID_INPUT", 422);

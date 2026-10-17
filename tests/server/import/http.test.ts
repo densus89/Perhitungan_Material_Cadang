@@ -13,11 +13,44 @@ vi.mock("../../../src/server/import/dependencies", () => ({ createImportDependen
 export const createInput = { unitId, fileName: "synthetic.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", byteSize: 123, sha256: "a".repeat(64) };
 export function request(body: unknown, origin = "https://material.example", type = "application/json") { return new Request("https://material.example/api/imports/", { method: "POST", headers: { Origin: origin, "Content-Type": type }, body: JSON.stringify(body) }); }
 beforeEach(() => {
-  vi.resetAllMocks(); mocks.actor.mockResolvedValue(actor);
+  vi.resetAllMocks(); vi.unstubAllEnvs(); mocks.actor.mockResolvedValue(actor);
   for (const [key, value] of Object.entries({ NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "public-fixture", SUPABASE_SECRET_KEY: "secret-fixture", NEXT_PUBLIC_SITE_URL: "https://material.example" })) vi.stubEnv(key, value);
 });
 const handler = async () => ({ importId: "30000000-0000-4000-8000-000000000001", stage: "UPLOAD" });
 describe("import mutation boundary", () => {
+  const accepted = async () => ({ importId: "30000000-0000-4000-8000-000000000001", datasetId: "30000000-0000-4000-8000-000000000002", versionId: "30000000-0000-4000-8000-000000000003", stage: "UPLOAD" });
+  it.each([
+    { environment: "preview", vercel: "1", url: "asset-preview-123-team.vercel.app", origin: "https://asset-preview-123-team.vercel.app", status: 200 },
+    { environment: "production", vercel: "1", url: "asset-preview-123-team.vercel.app", origin: "https://material.example", status: 200 },
+    { environment: "production", vercel: "1", url: "asset-preview-123-team.vercel.app", origin: "https://asset-preview-123-team.vercel.app", status: 403 },
+    { environment: "preview", vercel: "1", url: "asset-preview-123-team.vercel.app", origin: "https://material.example", status: 403 },
+    { environment: "preview", vercel: "1", url: "asset-preview-123-team.vercel.app", origin: "https://other-preview.vercel.app", status: 403 },
+    { environment: undefined, vercel: undefined, url: "asset-preview-123-team.vercel.app", origin: "https://asset-preview-123-team.vercel.app", status: 403 },
+    { environment: undefined, vercel: undefined, url: undefined, origin: "https://material.example", status: 200 },
+  ])("uses only the trusted deployment origin %#", async ({ environment, vercel, url, origin, status }) => {
+    vi.stubEnv("VERCEL_ENV", environment); vi.stubEnv("VERCEL", vercel); vi.stubEnv("VERCEL_URL", url);
+    expect((await assetImportMutation(request(createInput, origin), createImportSchema, accepted)).status).toBe(status);
+  });
+  it.each([undefined, "", "https://asset-preview.vercel.app", "asset-preview.vercel.app/", "asset-preview.vercel.app/path", "asset-preview.vercel.app?query=1", "asset-preview.vercel.app#fragment", "actor@asset-preview.vercel.app", "asset-preview.vercel.app:443", "asset-preview.vercel.app.evil.example", "evil.example", "asset-preview.vercel.app\n", "UPPER.vercel.app", "-asset.vercel.app", "asset-.vercel.app"])("fails closed for malformed preview configuration %#", async url => {
+    vi.stubEnv("VERCEL", "1"); vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("VERCEL_URL", url);
+    expect((await assetImportMutation(request(createInput), createImportSchema, accepted)).status).toBe(403);
+    expect(mocks.admin).not.toHaveBeenCalled();
+  });
+  it("does not trust preview flags without Vercel system context", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("VERCEL_URL", "asset-preview.vercel.app");
+    expect((await assetImportMutation(request(createInput), createImportSchema, accepted)).status).toBe(403);
+  });
+  it.each(["https://user:pass@material.example", "https://material.example/path", "https://material.example?x=1", "https://material.example#x", "ftp://material.example", "not-a-url"])("fails closed for invalid canonical origin %#", async site => {
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", site);
+    expect((await assetImportMutation(request(createInput), createImportSchema, accepted)).status).toBe(403);
+    expect(mocks.admin).not.toHaveBeenCalled();
+  });
+  it("never derives trusted origins from request or forwarding hosts", async () => {
+    const forged = new Request("https://evil.example/api/imports/", { method: "POST", headers: { Origin: "https://evil.example", Host: "evil.example", "X-Forwarded-Host": "evil.example", "Content-Type": "application/json" }, body: JSON.stringify(createInput) });
+    expect((await assetImportMutation(forged, createImportSchema, accepted)).status).toBe(403);
+    const crossSite = request(createInput); crossSite.headers.set("Sec-Fetch-Site", "cross-site");
+    expect((await assetImportMutation(crossSite, createImportSchema, accepted)).status).toBe(403); expect(mocks.admin).not.toHaveBeenCalled();
+  });
   it.each(["UNAUTHENTICATED", "FORBIDDEN"] as const)("rejects %s before privilege", async (code) => {
     mocks.actor.mockRejectedValue(new ActorAccessError(code));
     expect((await assetImportMutation(request(createInput), createImportSchema, handler)).status).toBe(code === "UNAUTHENTICATED" ? 401 : 403);

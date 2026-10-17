@@ -14,7 +14,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("../../../src/server/auth/actor", async original => ({ ...await original<object>(), requireActor: mocks.actor }));
 vi.mock("../../../src/lib/supabase/server", () => ({ createServerSupabaseClient: mocks.session }));
 vi.mock("../../../src/lib/supabase/admin", () => ({ createAdminSupabaseClient: mocks.admin }));
-beforeEach(() => { vi.resetAllMocks(); mocks.actor.mockResolvedValue({ ...actor, role: "RST_REVIEWER" }); vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://material.example"); });
+beforeEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); mocks.actor.mockResolvedValue({ ...actor, role: "RST_REVIEWER" }); vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://material.example"); });
 const context = { params: Promise.resolve({ versionId: actor.userId }) };
 it.each(["UNIT_OPERATOR", "VIEWER"])("denies %s on all review routes before service client", async role => { mocks.actor.mockResolvedValue({ ...actor, role }); for (const handler of [GET, detail, approve, returnVersion, trash]) { const result = await handler(new Request("https://material.example/api/reviews/asset-versions/", { method: handler === GET || handler === detail ? "GET" : "POST" }), context); expect(result.status).toBe(403); expect(result.headers.get("cache-control")).toContain("no-store"); } expect(mocks.admin).not.toHaveBeenCalled(); });
 it("rejects injected filters and malformed ids without privilege", async () => { expect((await GET(new Request("https://material.example/api/reviews/asset-versions/?issue=BAD),x.eq.secret"))).status).toBe(422); expect((await detail(new Request("https://material.example/"), { params: Promise.resolve({ versionId: "bad" }) })).status).toBe(422); expect(mocks.admin).not.toHaveBeenCalled(); });
@@ -27,4 +27,12 @@ it("accepts safe real-state unprocessed DRAFT trash for admin without synthetic 
   Object.assign(f.state, { versionId: actor.userId, status: "DRAFT", eligibleDraftTrash: true, runId: null, expected }); mocks.actor.mockResolvedValue({ ...actor, role: "RST_ADMIN" }); mocks.admin.mockReturnValue(f.client);
   const result = await trash(new Request("https://material.example/", { method: "POST", headers: { origin: "https://material.example", "content-type": "application/json" }, body: JSON.stringify({ expected, notes: "Duplicate digest checked", confirmed: true }) }), context);
   expect(result.status).toBe(200); expect(f.client.rpc).toHaveBeenCalledWith("review_asset_version", expect.objectContaining({ p_expected: expected, p_action: "TRASH" }));
+});
+it("accepts only this deployment's trusted preview origin for review decisions", async () => {
+  const f = readFixture(), expected = { kind: "UNPROCESSED_DRAFT", unitId: unit, sourceFileId: actor.userId, mappingRevision: actor.userId, updatedAt: "2026-10-16T00:00:00Z" };
+  Object.assign(f.state, { versionId: actor.userId, status: "DRAFT", eligibleDraftTrash: true, runId: null, expected }); mocks.actor.mockResolvedValue({ ...actor, role: "RST_ADMIN" }); mocks.admin.mockReturnValue(f.client);
+  vi.stubEnv("VERCEL", "1"); vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("VERCEL_URL", "asset-preview-123-team.vercel.app");
+  const request = (origin: string) => new Request("https://asset-preview-123-team.vercel.app/", { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ expected, notes: "Synthetic duplicate digest checked", confirmed: true }) });
+  expect((await trash(request("https://asset-preview-123-team.vercel.app"), context)).status).toBe(200);
+  mocks.admin.mockClear(); expect((await trash(request("https://material.example"), context)).status).toBe(403); expect(mocks.admin).not.toHaveBeenCalled();
 });
