@@ -42,13 +42,13 @@ const columnPairs = {
 function storedAsset(row: Row<"asset_snapshot_rows">): ComparableAsset {
   return { ...Object.fromEntries(Object.entries(columnPairs).map(([field, column]) => [field, row[column]])) as unknown as CanonicalAssetInput, id: row.id };
 }
-async function insertInWindows<T extends "asset_snapshot_rows" | "asset_valuations">(table: T, records: Row<T>[], deps: ImportDependencies) {
+export async function insertInWindows<T extends "asset_snapshot_rows" | "asset_valuations">(table: T, records: Row<T>[], deps: ImportDependencies) {
   const batches = Array.from({ length: Math.ceil(records.length / 1000) }, (_, index) => records.slice(index * 1000, (index + 1) * 1000));
-  // Two payloads at a time keep hosted memory below the runtime ceiling while
-  // still overlapping network latency. Eight concurrent JSON payloads caused
-  // the 141,105-row function to terminate immediately after reservation.
-  for (let index = 0; index < batches.length; index += 2) {
-    await Promise.all(batches.slice(index, index + 2).map((batch) => deps.insertBatch(table, batch)));
+  // Four payloads overlap hosted PostgREST latency without returning row bodies.
+  // The statement-level database guard locks each run once per batch; the prior
+  // row-level guard made larger windows repeatedly lock the run for every row.
+  for (let index = 0; index < batches.length; index += 4) {
+    await Promise.all(batches.slice(index, index + 4).map((batch) => deps.insertBatch(table, batch)));
   }
 }
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {

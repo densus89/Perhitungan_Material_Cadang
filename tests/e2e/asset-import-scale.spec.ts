@@ -41,6 +41,28 @@ async function writeScaleWorkbook(path: string, scenario: AssetScenario) {
   await workbook.commit();
 }
 
+async function logScaleFailureState(scenario: AssetScenario) {
+  const runResult = await scenario.client.from("asset_import_runs")
+    .select("id,status,expected_row_count,expected_valuation_count,created_at")
+    .eq("unit_induk_id", scenario.unitId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const run = runResult.data;
+  if (runResult.error || !run) {
+    console.log(JSON.stringify({ scenario: "asset-import-scale-diagnostic", run: null, code: runResult.error?.code ?? "NO_RUN" }));
+    return;
+  }
+  const [rows, valuations] = await Promise.all([
+    scenario.client.from("asset_snapshot_rows").select("id", { count: "exact", head: true }).eq("import_run_id", run.id),
+    scenario.client.from("asset_valuations").select("asset_row_id", { count: "exact", head: true }).eq("import_run_id", run.id),
+  ]);
+  console.log(JSON.stringify({
+    scenario: "asset-import-scale-diagnostic",
+    run: { status: run.status, expectedRows: run.expected_row_count, expectedValuations: run.expected_valuation_count },
+    persistedRows: rows.count,
+    persistedValuations: valuations.count,
+    queryCodes: [rows.error?.code ?? null, valuations.error?.code ?? null],
+  }));
+}
+
 test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
   test.skip(requestedRows !== SCALE_ROWS, `Set E2E_SCALE_ROWS=${SCALE_ROWS} to run the destructive, isolated scale gate.`);
   test.describe.configure({ timeout: 900000 });
@@ -59,7 +81,13 @@ test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
 
       await loginAssetActor(page, scenario, "operator");
       await page.goto("/impor/");
-      const result = await uploadAssetWorkbookPath(page, scenario, path, { previewTimeoutMs: 300000, processTimeoutMs: 300000 });
+      let result;
+      try {
+        result = await uploadAssetWorkbookPath(page, scenario, path, { previewTimeoutMs: 300000, processTimeoutMs: 300000 });
+      } catch (error) {
+        await logScaleFailureState(scenario);
+        throw error;
+      }
 
       expect(result.stage).toBe("READY_TO_SUBMIT");
       expect(result.summary?.rowCount).toBe(SCALE_ROWS);
@@ -75,9 +103,9 @@ test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
       expect(session.error).toBeNull();
       expect(session.data?.current_run_id).toBeTruthy();
       const runId = session.data!.current_run_id!;
-      const run = await scenario.client.from("asset_import_runs").select("status,expected_row_count,expected_valuation_count,actual_row_count,actual_valuation_count").eq("id", runId).single();
+      const run = await scenario.client.from("asset_import_runs").select("status,expected_row_count,expected_valuation_count").eq("id", runId).single();
       expect(run.error).toBeNull();
-      expect(run.data).toMatchObject({ status: "COMPLETE", expected_row_count: SCALE_ROWS, expected_valuation_count: SCALE_ROWS, actual_row_count: SCALE_ROWS, actual_valuation_count: SCALE_ROWS });
+      expect(run.data).toMatchObject({ status: "COMPLETE", expected_row_count: SCALE_ROWS, expected_valuation_count: SCALE_ROWS });
 
       const [rows, valuations] = await Promise.all([
         scenario.client.from("asset_snapshot_rows").select("id", { count: "exact", head: true }).eq("import_run_id", runId),

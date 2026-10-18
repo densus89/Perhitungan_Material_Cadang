@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { processStoredWorkbook, persistedRecordHashes, postgresJsonb } from "../../../src/server/import/process-workbook";
+import { processStoredWorkbook, persistedRecordHashes, postgresJsonb, insertInWindows } from "../../../src/server/import/process-workbook";
 import { completeSourceUpload, saveImportMapping, submitAssetVersion, loadAssetImport, createAssetImport } from "../../../src/server/import/service";
 import { readAssetWorkbook } from "../../../src/lib/spreadsheet/read-asset-workbook";
 import { fixture } from "./lifecycle-fixture";
@@ -44,6 +44,20 @@ describe("authoritative workbook processing", () => {
     expect(result.summary?.rowCount).toBe(1001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:1000", "insert:asset_snapshot_rows:1"]);
     expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:1000", "insert:asset_valuations:1"]);
   }, 30000);
+  it("caps batch insertion at four concurrent 1000-row payloads", async () => {
+    let active = 0, maximum = 0;
+    const sizes: number[] = [];
+    const deps = {
+      insertBatch: async (_table: string, rows: unknown[]) => {
+        active += 1; maximum = Math.max(maximum, active); sizes.push(rows.length);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        active -= 1;
+      },
+    } as unknown as Parameters<typeof insertInWindows>[2];
+    await insertInWindows("asset_snapshot_rows", Array.from({ length: 4501 }, (_, id) => ({ id })) as never, deps);
+    expect(maximum).toBe(4);
+    expect(sizes).toEqual([1000, 1000, 1000, 1000, 501]);
+  });
   it("downloads stored bytes, finalizes rows and summary, then permits submission without activation", async () => {
     const f = await prepared(); const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
     expect(result.stage).toBe("READY_TO_SUBMIT"); expect(f.tables.asset_snapshot_rows[0].no_aset).toBe("000002"); expect(f.tables.asset_valuations[0].nilai_abc).toBe(0);
