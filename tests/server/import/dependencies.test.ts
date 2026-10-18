@@ -17,6 +17,7 @@ describe("import persistence adapter", () => {
     const valuations = [{ asset_row_id: "r1", import_run_id: "run" }, { asset_row_id: "r2", import_run_id: "run" }] as never;
     await deps.insertAssetBatch("actor", "run", rows, valuations);
     expect(rpc).toHaveBeenCalledWith("insert_asset_import_batch", { p_actor_id: "actor", p_run_id: "run", p_rows: { id: ["r1", "r2"], import_run_id: ["run", "run"] }, p_valuations: { asset_row_id: ["r1", "r2"], import_run_id: ["run", "run"] } });
+    await expect(deps.insertAssetBatch("actor", "run", Array.from({ length: 1001 }, () => rows[0]), Array.from({ length: 1001 }, () => valuations[0]))).rejects.toThrow("Invalid asset import batch");
   });
   it("reads every PostgREST page in bounded parallel windows and preserves order", async () => {
     const source = Array.from({ length: 9001 }, (_, index) => ({ id: String(index).padStart(5, "0") }));

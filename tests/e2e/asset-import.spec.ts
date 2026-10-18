@@ -2,6 +2,23 @@ import { expect as baseExpect, test } from "@playwright/test";
 import { createAssetScenario, cleanupAssetScenario, loginAssetActor, uploadAssetWorkbook, type AssetScenario } from "./support/asset-scenario";
 const expect = baseExpect.configure({ timeout: 30000 });
 
+async function logFailureState(scenario: AssetScenario) {
+  const runResult = await scenario.client.from("asset_import_runs")
+    .select("id,status,expected_row_count,expected_valuation_count,dataset_version_id,created_at")
+    .eq("unit_induk_id", scenario.unitId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const run = runResult.data;
+  if (runResult.error || !run) {
+    console.log(JSON.stringify({ scenario: "asset-import-diagnostic", run: null, code: runResult.error?.code ?? "NO_RUN" }));
+    return;
+  }
+  const [rows, valuations, version] = await Promise.all([
+    scenario.client.from("asset_snapshot_rows").select("id", { count: "exact", head: true }).eq("import_run_id", run.id),
+    scenario.client.from("asset_valuations").select("asset_row_id", { count: "exact", head: true }).eq("import_run_id", run.id),
+    scenario.client.from("dataset_versions").select("status").eq("id", run.dataset_version_id).single(),
+  ]);
+  console.log(JSON.stringify({ scenario: "asset-import-diagnostic", run: { status: run.status, expectedRows: run.expected_row_count, expectedValuations: run.expected_valuation_count }, versionStatus: version.data?.status ?? null, persistedRows: rows.count, persistedValuations: valuations.count, queryCodes: [rows.error?.code ?? null, valuations.error?.code ?? null, version.error?.code ?? null] }));
+}
+
 test.describe.serial("private, versioned synthetic asset import", () => {
   test.describe.configure({ timeout: 600000 });
   let scenario: AssetScenario;
@@ -47,7 +64,9 @@ test.describe.serial("private, versioned synthetic asset import", () => {
       await openReview("first"); await decide("Setujui & aktifkan", "Synthetic reviewed first snapshot");
       await expect(reviewer.getByRole("status").filter({ hasText: "Versi aktif:" })).toBeVisible();
       await page.getByRole("button", { name: "Impor snapshot baru" }).click();
-      const next = await uploadAssetWorkbook(page, scenario, "second", { revised: true });
+      let next;
+      try { next = await uploadAssetWorkbook(page, scenario, "second", { revised: true }); }
+      catch (error) { await logFailureState(scenario); throw error; }
       await page.getByRole("button", { name: "Tinjau perbandingan" }).click();
       expect(next.comparison?.hasActiveVersion).toBe(true);
       await page.getByRole("button", { name: "Ajukan persetujuan DIV RST" }).click(); await expect(page.getByText("Status server: PENDING_RST")).toBeVisible();

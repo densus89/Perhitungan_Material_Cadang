@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 -- Explicit identifier types/descriptions prevent selecting a different pgTAP overload.
-select extensions.plan(47);
+select extensions.plan(48);
 
 select extensions.has_enum('public'::name,'asset_import_run_status'::name,'Import run status enum exists'::text);
 select extensions.enum_has_labels('public'::name,'asset_import_run_status'::name,array['PROCESSING','FAILED','COMPLETE']::name[],'Enum labels match asset_import_run_status'::text);
@@ -30,6 +30,7 @@ select extensions.ok(strpos(pg_get_functiondef('private.guard_asset_insert_state
 select extensions.ok(strpos(pg_get_functiondef('public.finalize_asset_import_run(uuid,uuid)'::regprocedure),'pg_advisory_xact_lock(')>0,'Finalization takes the exclusive run-scoped lifecycle lock');
 select extensions.ok(strpos(pg_get_functiondef('public.fail_asset_import_run(uuid,uuid)'::regprocedure),'pg_advisory_xact_lock(')>0,'Failure takes the exclusive run-scoped lifecycle lock');
 select extensions.has_function('public'::name,'insert_asset_import_batch'::name,array['uuid','uuid','jsonb','jsonb']::name[],'Columnar asset batch RPC exists');
+select extensions.ok(strpos(regexp_replace(pg_get_functiondef('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure),'[[:space:]]','','g'),'row_count>1000')>0,'Columnar asset RPC enforces the hosted-safe 1000-row limit');
 select extensions.has_index('public'::name,'asset_valuations'::name,'asset_valuations_warnings_gin'::name,array['warning_codes']::name[],'Index asset_valuations_warnings_gin covers expected columns'::text);
 select extensions.is((select am.amname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_am am on am.oid=c.relam
  where n.nspname='public' and c.relname=index_name),'gin'::name,('Issue index uses GIN: '||index_name)::text)

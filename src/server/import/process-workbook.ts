@@ -81,7 +81,7 @@ function compactDonorEvidence(evidence: ValuationEvidence, coordinateVersions: s
 }
 export async function insertInWindows(actorId: string, runId: string, rows: Row<"asset_snapshot_rows">[], valuations: Row<"asset_valuations">[], deps: ImportDependencies) {
   if (valuations.length !== rows.length) throw new Error("Mismatched asset import records");
-  const batches = Array.from({ length: Math.ceil(rows.length / 2000) }, (_, index) => ({ rows: rows.slice(index * 2000, (index + 1) * 2000), valuations: valuations.slice(index * 2000, (index + 1) * 2000) }));
+  const batches = Array.from({ length: Math.ceil(rows.length / 1000) }, (_, index) => ({ rows: rows.slice(index * 1000, (index + 1) * 1000), valuations: valuations.slice(index * 1000, (index + 1) * 1000) }));
   // Two columnar payloads overlap hosted latency without exhausting the free
   // pool. Each RPC atomically inserts its paired snapshot and valuation rows.
   for (let index = 0; index < batches.length; index += 2) {

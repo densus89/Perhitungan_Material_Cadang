@@ -38,13 +38,13 @@ describe("authoritative workbook processing", () => {
     expect(persistedRecordHashes([{ ...rows[0], source_row_number: 2 }], values).rowsHash).not.toBe(hashes.rowsHash);
     expect(persistedRecordHashes(rows, [{ ...values[0], nilai_abc: 1 }]).valuationsHash).not.toBe(hashes.valuationsHash);
   });
-  it("writes 2001 rows in bounded complete batches", async () => {
-    const f = await prepared(Array.from({ length: 2001 }, (_, index) => assetRow.map((value, column) => column === 4 ? String(index).padStart(6, "0") : value)));
+  it("writes 1001 rows in bounded complete batches", async () => {
+    const f = await prepared(Array.from({ length: 1001 }, (_, index) => assetRow.map((value, column) => column === 4 ? String(index).padStart(6, "0") : value)));
     const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
-    expect(result.summary?.rowCount).toBe(2001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:2000", "insert:asset_snapshot_rows:1"]);
-    expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:2000", "insert:asset_valuations:1"]);
+    expect(result.summary?.rowCount).toBe(1001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:1000", "insert:asset_snapshot_rows:1"]);
+    expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:1000", "insert:asset_valuations:1"]);
   }, 30000);
-  it("caps paired columnar insertion at two concurrent 2000-row payloads", async () => {
+  it("caps paired columnar insertion at two concurrent 1000-row payloads", async () => {
     let active = 0, maximum = 0;
     const sizes: number[] = [];
     const deps = {
@@ -55,10 +55,10 @@ describe("authoritative workbook processing", () => {
         active -= 1;
       },
     } as unknown as Parameters<typeof insertInWindows>[4];
-    const records = Array.from({ length: 4501 }, (_, id) => ({ id })) as never;
+    const records = Array.from({ length: 2501 }, (_, id) => ({ id })) as never;
     await insertInWindows("actor", "run", records, records, deps);
     expect(maximum).toBe(2);
-    expect(sizes).toEqual([2000, 2000, 501]);
+    expect(sizes).toEqual([1000, 1000, 501]);
   });
   it("downloads stored bytes, finalizes rows and summary, then permits submission without activation", async () => {
     const f = await prepared(); const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
