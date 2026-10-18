@@ -44,7 +44,7 @@ describe("authoritative workbook processing", () => {
     expect(result.summary?.rowCount).toBe(1001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:1001"]);
     expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:1001"]);
   }, 30000);
-  it("writes paired 2000-row payloads sequentially for the hosted connection budget", async () => {
+  it("caps packed 2000-row writes at two concurrent hosted requests", async () => {
     let active = 0, maximum = 0;
     const sizes: number[] = [];
     const deps = {
@@ -57,7 +57,7 @@ describe("authoritative workbook processing", () => {
     } as unknown as Parameters<typeof insertInWindows>[4];
     const records = Array.from({ length: 4501 }, (_, id) => ({ id })) as never;
     await insertInWindows("actor", "run", records, records, deps);
-    expect(maximum).toBe(1);
+    expect(maximum).toBe(2);
     expect(sizes).toEqual([2000, 2000, 501]);
   });
   it("downloads stored bytes, finalizes rows and summary, then permits submission without activation", async () => {

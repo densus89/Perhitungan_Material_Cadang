@@ -82,11 +82,10 @@ function compactDonorEvidence(evidence: ValuationEvidence, coordinateVersions: s
 export async function insertInWindows(actorId: string, runId: string, rows: Row<"asset_snapshot_rows">[], valuations: Row<"asset_valuations">[], deps: ImportDependencies) {
   if (valuations.length !== rows.length) throw new Error("Mismatched asset import records");
   const batches = Array.from({ length: Math.ceil(rows.length / 2000) }, (_, index) => ({ rows: rows.slice(index * 2000, (index + 1) * 2000), valuations: valuations.slice(index * 2000, (index + 1) * 2000) }));
-  // Keep one transaction in flight at a time so large imports stay within
-  // the hosted free-tier connection budget. Each RPC still atomically inserts
-  // its paired snapshot and valuation rows.
-  for (const batch of batches) {
-    await deps.insertAssetBatch(actorId, runId, batch.rows, batch.valuations);
+  // Two compact requests overlap network serialization/latency while the
+  // shared run lock still lets each RPC insert its paired rows atomically.
+  for (let index = 0; index < batches.length; index += 2) {
+    await Promise.all(batches.slice(index, index + 2).map((batch) => deps.insertAssetBatch(actorId, runId, batch.rows, batch.valuations)));
   }
 }
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {
