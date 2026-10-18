@@ -44,7 +44,7 @@ describe("authoritative workbook processing", () => {
     expect(result.summary?.rowCount).toBe(1001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:1000", "insert:asset_snapshot_rows:1"]);
     expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:1000", "insert:asset_valuations:1"]);
   }, 30000);
-  it("caps batch insertion at four concurrent 1000-row payloads", async () => {
+  it("caps batch insertion at two concurrent 1000-row payloads", async () => {
     let active = 0, maximum = 0;
     const sizes: number[] = [];
     const deps = {
@@ -55,7 +55,7 @@ describe("authoritative workbook processing", () => {
       },
     } as unknown as Parameters<typeof insertInWindows>[2];
     await insertInWindows("asset_snapshot_rows", Array.from({ length: 4501 }, (_, id) => ({ id })) as never, deps);
-    expect(maximum).toBe(4);
+    expect(maximum).toBe(2);
     expect(sizes).toEqual([1000, 1000, 1000, 1000, 501]);
   });
   it("downloads stored bytes, finalizes rows and summary, then permits submission without activation", async () => {
