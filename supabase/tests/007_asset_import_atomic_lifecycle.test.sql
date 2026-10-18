@@ -45,7 +45,28 @@ select lives_ok($$select public.fail_asset_import_run(pg_temp.uid(1,1),pg_temp.u
 select is((select status::text from public.asset_import_runs where id=pg_temp.uid(8,1)),'FAILED','Failure releases the reservation');
 select lives_ok($$select pg_temp.replace_mapping(1)$$,'Mapping can change after FAILED');
 select lives_ok($$select pg_temp.reserve(1,2)$$,'Retry reserves a new run');
+select throws_ok($$
+ insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_version_id,import_sheet_id,source_row_number,no_aset,kondisi_aset)
+ values(pg_temp.uid(9,89),pg_temp.uid(8,2),pg_temp.uid(2,1),pg_temp.uid(4,1),pg_temp.uid(7,2),89,'CROSS-SESSION','P2')
+$$,'22023',null,'Statement guard rejects a sheet from another import session');
+select lives_ok($$
+ insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_version_id,import_sheet_id,source_row_number,no_aset,kondisi_aset)
+ select pg_temp.uid(9,n),pg_temp.uid(8,2),pg_temp.uid(2,1),pg_temp.uid(4,1),pg_temp.uid(7,1),n,'BATCH-'||n,'P2'
+ from generate_series(90,91)n
+$$,'Statement guard accepts a valid multi-row batch');
+delete from public.asset_snapshot_rows where id in(pg_temp.uid(9,90),pg_temp.uid(9,91));
+insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_version_id,import_sheet_id,source_row_number,no_aset,kondisi_aset)
+values(pg_temp.uid(9,92),pg_temp.uid(8,2),pg_temp.uid(2,1),pg_temp.uid(4,1),pg_temp.uid(7,1),92,'APPROVAL-GUARD','P2');
+select throws_ok($$
+ insert into public.asset_valuations(asset_row_id,import_run_id,unit_induk_id,dataset_version_id,value_source,nilai_abc,calculation_method,age_status,rule_version,as_of,approved_by,approved_at,approval_notes)
+ values(pg_temp.uid(9,92),pg_temp.uid(8,2),pg_temp.uid(2,1),pg_temp.uid(4,1),'SAP_BOOK_VALUE',0,'DIRECT_BOOK_VALUE','PROVIDED_AGE','test','2026-10-16',pg_temp.uid(1,2),now(),'bypass')
+$$,'22023',null,'Statement guard rejects pre-approved valuation inserts');
+delete from public.asset_snapshot_rows where id=pg_temp.uid(9,92);
 select lives_ok($$select pg_temp.finalize(1,2)$$,'Finalization creates run-specific summary atomically');
+select throws_ok($$
+ insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_version_id,import_sheet_id,source_row_number,no_aset,kondisi_aset)
+ values(pg_temp.uid(9,93),pg_temp.uid(8,2),pg_temp.uid(2,1),pg_temp.uid(4,1),pg_temp.uid(7,1),93,'LATE-WRITE','P2')
+$$,'22023',null,'Statement guard freezes inserts after finalization');
 select is((select import_run_id from public.asset_import_run_metadata where import_run_id=pg_temp.uid(8,2)),(select current_run_id from public.import_sessions where id=pg_temp.uid(6,1)),'Summary belongs to the finalized current run');
 select is((select summary->>'rowCount' from public.asset_import_run_metadata where import_run_id=pg_temp.uid(8,2)),'1','Summary is derived from persisted rows');
 select lives_ok($$select public.complete_asset_import_comparison(pg_temp.uid(1,1),pg_temp.uid(8,2),null,null)$$,'Explicit no-active base is sealed');

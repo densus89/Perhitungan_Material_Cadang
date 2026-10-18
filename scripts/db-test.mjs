@@ -115,7 +115,10 @@ function run() {
       writeFileSync(wrapper, wrapTapSql(readFileSync(file, "utf8")));
       const result = spawnSync(process.execPath, [cli, "db", "query", "--linked", "--file", wrapper,
         "--output", "json", "--output-format", "text", "--agent", "no"], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
-      if (result.error || result.status !== 0) throw new Error(`Linked SQL runner failed for ${file}`);
+      if (result.error || result.status !== 0) {
+        const diagnostic = [result.error?.message, result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+        throw new Error(`Linked SQL runner failed for ${file}${diagnostic ? `\n${diagnostic}` : ""}`);
+      }
       const rows = JSON.parse(result.stdout);
       if (!Array.isArray(rows) || rows.some((row) => typeof row.tap !== "string")) {
         throw new Error("Linked SQL runner returned invalid TAP rows");
