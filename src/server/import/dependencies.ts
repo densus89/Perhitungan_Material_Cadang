@@ -22,6 +22,7 @@ export interface ImportDependencies {
   list<T extends ImportTable>(table: T, filters: Partial<Row<T>>): Promise<Row<T>[]>;
   insert<T extends ImportTable>(table: T, rows: Insert<T>[]): Promise<Row<T>[]>;
   insertBatch<T extends "asset_snapshot_rows" | "asset_valuations" | "asset_version_changes">(table: T, rows: Insert<T>[]): Promise<void>;
+  insertAssetBatch(actorId: string, runId: string, rows: Insert<"asset_snapshot_rows">[], valuations: Insert<"asset_valuations">[]): Promise<void>;
   update<T extends ImportTable>(table: T, filters: Partial<Row<T>>, values: Database["public"]["Tables"][T]["Update"]): Promise<void>;
   remove<T extends ImportTable>(table: T, filters: Partial<Row<T>>): Promise<void>;
   sign(path: string): Promise<{ path: string; token: string }>;
@@ -32,6 +33,13 @@ export interface ImportDependencies {
   failRun(actorId: string, runId: string): Promise<void>;
   sealComparison(actorId: string, runId: string, baseVersionId: string | null, comparisonId: string | null): Promise<void>;
   submit(actorId: string, versionId: string, expected: ExpectedSubmission): Promise<void>;
+}
+
+export function columnarRecords(records: Record<string, unknown>[]): Json {
+  if (!records.length) throw new Error("Empty columnar batch");
+  const keys = Object.keys(records[0]);
+  if (!keys.length || records.some((record) => Object.keys(record).length !== keys.length || keys.some((key) => !(key in record)))) throw new Error("Inconsistent columnar batch");
+  return Object.fromEntries(keys.map((key) => [key, records.map((record) => record[key] === undefined ? null : record[key])])) as Json;
 }
 
 /** The generic adapter never takes its table/filters from a request body. */
@@ -104,6 +112,18 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (error || count !== rows.length) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "insertBatch", table, code: error?.code ?? "COUNT_MISMATCH" }));
       check(error);
       if (count !== rows.length) throw new Error("Incomplete import batch");
+    },
+    async insertAssetBatch(actorId, runId, rows, valuations) {
+      if (!rows.length || rows.length > 2000 || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
+      const { data, error } = await client.rpc("insert_asset_import_batch", {
+        p_actor_id: actorId,
+        p_run_id: runId,
+        p_rows: columnarRecords(rows as Record<string, unknown>[]),
+        p_valuations: columnarRecords(valuations as Record<string, unknown>[]),
+      });
+      if (error || data !== rows.length) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "insertAssetBatch", code: error?.code ?? "COUNT_MISMATCH" }));
+      check(error);
+      if (data !== rows.length) throw new Error("Incomplete asset import batch");
     },
     async update(table, filters, values) { const { error } = await client.from(table).update(values as never).match(filters); check(error); },
     async remove(table, filters) { const { error } = await client.from(table).delete().match(filters); check(error); },

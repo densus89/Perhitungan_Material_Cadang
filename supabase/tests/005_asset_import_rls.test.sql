@@ -52,7 +52,7 @@ select ok(not has_column_privilege('service_role','public.import_sessions','curr
 select ok(not has_table_privilege('authenticated','public.'||name,'INSERT,UPDATE,DELETE'),'No direct writes: '||name) from (values
  ('source_files'),('import_sessions'),('import_sheets'),('mapping_profiles'),('import_column_mappings'),('asset_import_runs'),('asset_snapshot_rows'),('useful_life_rules'),('asset_class_mappings'),('asset_valuations'),('gi_location_references'),('version_comparisons'),('asset_version_changes'),('approval_events'),('audit_events')) t(name);
 select ok(not has_function_privilege('authenticated',signature,'EXECUTE') and has_function_privilege('service_role',signature,'EXECUTE'),'Service-only RPC: '||signature) from (values
- ('public.finalize_asset_import_run(uuid,uuid)'),('public.submit_asset_version(uuid,uuid,uuid,uuid,text,uuid,uuid)'),('public.review_asset_version(uuid,uuid,text,jsonb,text,uuid[],jsonb,boolean)'),('public.list_asset_version_reviews(jsonb)')) t(signature);
+ ('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'),('public.finalize_asset_import_run(uuid,uuid)'),('public.submit_asset_version(uuid,uuid,uuid,uuid,text,uuid,uuid)'),('public.review_asset_version(uuid,uuid,text,jsonb,text,uuid[],jsonb,boolean)'),('public.list_asset_version_reviews(jsonb)')) t(signature);
 
 select set_config('request.jwt.claim.sub','50000000-0000-4000-8000-000000000001',true);
 set local role authenticated;

@@ -37,6 +37,10 @@ export function fakeDependencies() {
       return values as Row<T>[];
     },
     async insertBatch(table, rows) { await deps.insert(table, rows); },
+    async insertAssetBatch(_actorId, _runId, rows, valuations) {
+      await deps.insert("asset_snapshot_rows", rows);
+      await deps.insert("asset_valuations", valuations);
+    },
     async update(table, filters, values) {
       for (const row of tables[table] ?? []) if (matching(row, filters)) Object.assign(row, values);
     },

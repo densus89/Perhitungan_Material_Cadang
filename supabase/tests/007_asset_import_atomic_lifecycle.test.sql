@@ -26,8 +26,27 @@ create function pg_temp.replace_mapping(n integer,h text default repeat('b',64))
 create function pg_temp.payload(n integer,h text default repeat('b',64)) returns jsonb language sql as $$select jsonb_build_object('id',pg_temp.uid(8,n),'expected_row_count',1,'expected_valuation_count',1,'source_hash',repeat('a',64),'mapping_hash',h,'rule_version','test','expected_rows_hash',repeat('c',64),'expected_valuations_hash',repeat('d',64))$$;
 create function pg_temp.reserve(s integer,r integer,h text default repeat('b',64)) returns uuid language sql as $$select public.reserve_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(6,s),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,s)),pg_temp.payload(r,h))$$;
 create function pg_temp.finalize(s integer,r integer) returns uuid language plpgsql as $$begin
- insert into public.asset_snapshot_rows(id,import_run_id,unit_induk_id,dataset_version_id,import_sheet_id,source_row_number,no_aset,kondisi_aset) values(pg_temp.uid(9,r),pg_temp.uid(8,r),pg_temp.uid(2,1),pg_temp.uid(4,s),pg_temp.uid(7,s),2,'SYNTHETIC','P2');
- insert into public.asset_valuations(asset_row_id,import_run_id,unit_induk_id,dataset_version_id,value_source,nilai_abc,calculation_method,age_status,rule_version,as_of) values(pg_temp.uid(9,r),pg_temp.uid(8,r),pg_temp.uid(2,1),pg_temp.uid(4,s),'SAP_BOOK_VALUE',0,'DIRECT_BOOK_VALUE','PROVIDED_AGE','test','2026-10-16');
+ perform public.insert_asset_import_batch(
+  pg_temp.uid(1,1),pg_temp.uid(8,r),
+  jsonb_build_object(
+   'id',jsonb_build_array(pg_temp.uid(9,r)),'import_run_id',jsonb_build_array(pg_temp.uid(8,r)),
+   'unit_induk_id',jsonb_build_array(pg_temp.uid(2,1)),'dataset_version_id',jsonb_build_array(pg_temp.uid(4,s)),
+   'import_sheet_id',jsonb_build_array(pg_temp.uid(7,s)),'source_row_number',jsonb_build_array(2),
+   'no_aset',jsonb_build_array('SYNTHETIC'),'kondisi_aset',jsonb_build_array('P2'),
+   'provenance',jsonb_build_array('{}'::jsonb),'error_codes',jsonb_build_array('[]'::jsonb),
+   'warning_codes',jsonb_build_array('[]'::jsonb),'created_at',jsonb_build_array(now())
+  ),
+  jsonb_build_object(
+   'asset_row_id',jsonb_build_array(pg_temp.uid(9,r)),'import_run_id',jsonb_build_array(pg_temp.uid(8,r)),
+   'unit_induk_id',jsonb_build_array(pg_temp.uid(2,1)),'dataset_version_id',jsonb_build_array(pg_temp.uid(4,s)),
+   'nilai_abc',jsonb_build_array(0),'value_source',jsonb_build_array('SAP_BOOK_VALUE'),
+   'calculation_method',jsonb_build_array('DIRECT_BOOK_VALUE'),'age_status',jsonb_build_array('PROVIDED_AGE'),
+   'rule_version',jsonb_build_array('test'),'as_of',jsonb_build_array('2026-10-16'),
+   'manual_approval_required',jsonb_build_array(false),'selected_donor_ids',jsonb_build_array('[]'::jsonb),
+   'donor_evidence',jsonb_build_array('{}'::jsonb),'calculation_evidence',jsonb_build_array('{}'::jsonb),
+   'warning_codes',jsonb_build_array('[]'::jsonb),'created_at',jsonb_build_array(now())
+  )
+ );
  update public.asset_import_runs r0 set expected_rows_hash=h.rows_hash,expected_valuations_hash=h.valuations_hash from private.asset_run_hashes(pg_temp.uid(8,r))h where r0.id=pg_temp.uid(8,r);
  return public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,r));
 end$$;
@@ -108,6 +127,6 @@ set local role authenticated;
 select is((select count(*) from public.asset_import_run_metadata),3::bigint,'Assigned operator reads only its finalized run metadata');
 reset role;
 select ok(not has_function_privilege('authenticated',signature,'EXECUTE') and has_function_privilege('service_role',signature,'EXECUTE'),'Actor-checked service-only RPC: '||signature) from(values
- ('public.replace_asset_import_mapping(uuid,uuid,uuid,uuid,jsonb,text,text,text,text)'),('public.reserve_asset_import_run(uuid,uuid,uuid,jsonb)'),('public.fail_asset_import_run(uuid,uuid)'),('public.complete_asset_import_comparison(uuid,uuid,uuid,uuid)'),('public.submit_asset_version(uuid,uuid,uuid,uuid,text,uuid,uuid)'))f(signature);
+ ('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'),('public.replace_asset_import_mapping(uuid,uuid,uuid,uuid,jsonb,text,text,text,text)'),('public.reserve_asset_import_run(uuid,uuid,uuid,jsonb)'),('public.fail_asset_import_run(uuid,uuid)'),('public.complete_asset_import_comparison(uuid,uuid,uuid,uuid)'),('public.submit_asset_version(uuid,uuid,uuid,uuid,text,uuid,uuid)'))f(signature);
 select * from finish();
 rollback;

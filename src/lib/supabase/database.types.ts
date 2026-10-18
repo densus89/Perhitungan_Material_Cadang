@@ -1353,6 +1353,15 @@ export type Database = {
         Args: { p_version_id: string }
         Returns: Json
       }
+      insert_asset_import_batch: {
+        Args: {
+          p_actor_id: string
+          p_run_id: string
+          p_rows: Json
+          p_valuations: Json
+        }
+        Returns: number
+      }
       list_asset_version_reviews: { Args: { p_filters: Json }; Returns: Json }
       replace_asset_import_mapping: {
         Args: {

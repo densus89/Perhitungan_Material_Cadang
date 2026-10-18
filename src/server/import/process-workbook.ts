@@ -42,13 +42,50 @@ const columnPairs = {
 function storedAsset(row: Row<"asset_snapshot_rows">): ComparableAsset {
   return { ...Object.fromEntries(Object.entries(columnPairs).map(([field, column]) => [field, row[column]])) as unknown as CanonicalAssetInput, id: row.id };
 }
-export async function insertInWindows<T extends "asset_snapshot_rows" | "asset_valuations">(table: T, records: Row<T>[], deps: ImportDependencies) {
-  const batches = Array.from({ length: Math.ceil(records.length / 1000) }, (_, index) => records.slice(index * 1000, (index + 1) * 1000));
-  // Two payloads overlap hosted PostgREST latency without exhausting the free
-  // pool. The set-based shared-lock guard keeps each batch fast while allowing
-  // both writes to proceed concurrently and finalization to remain exclusive.
+type ValuationEvidence = ReturnType<typeof resolveAssetValuation>["evidence"];
+function compactCalculationEvidence(evidence: ValuationEvidence) {
+  const ageDonors = evidence.age.donorIds.length, rejectedAgeDonors = evidence.age.rejectedDonors.length;
+  const comparables = evidence.comparables;
+  return {
+    ...(evidence.sourceField ? { sourceField: evidence.sourceField, sourceAddress: evidence.sourceCell?.address ?? null } : {}),
+    ...(evidence.referencePrice === null ? {} : { referencePrice: evidence.referencePrice }),
+    ...(evidence.priceDate ? { priceDate: evidence.priceDate } : {}),
+    ...(evidence.ageYears === null ? {} : { ageYears: evidence.ageYears }),
+    ...(evidence.usefulLifeYears === null ? {} : { usefulLifeYears: evidence.usefulLifeYears }),
+    ...(evidence.age.tier || ageDonors || rejectedAgeDonors || evidence.age.warnings.length ? { age: {
+      status: evidence.age.status,
+      ...(evidence.age.tier ? { tier: evidence.age.tier } : {}),
+      ...(ageDonors ? { donorCount: ageDonors } : {}),
+      ...(rejectedAgeDonors ? { rejectedDonorCount: rejectedAgeDonors } : {}),
+      ...(evidence.age.warnings.length ? { warnings: evidence.age.warnings } : {}),
+    } } : {}),
+    ...(comparables ? { comparables: {
+      status: comparables.status, tier: comparables.tier, median: comparables.median,
+      candidateCount: comparables.candidateCount, min: comparables.min, max: comparables.max, dispersion: comparables.dispersion,
+      donorCount: comparables.selectedDonorIds.length, rejectedDonorCount: comparables.rejectedDonors.length,
+      ...(comparables.warnings.length ? { warnings: comparables.warnings } : {}),
+    } } : {}),
+  };
+}
+function compactDonorEvidence(evidence: ValuationEvidence, coordinateVersions: string[]) {
+  const comparables = evidence.comparables;
+  return {
+    ...(comparables ? {
+      status: comparables.status, tier: comparables.tier, median: comparables.median,
+      candidateCount: comparables.candidateCount, min: comparables.min, max: comparables.max, dispersion: comparables.dispersion,
+      donorCount: comparables.selectedDonorIds.length, rejectedDonorCount: comparables.rejectedDonors.length,
+      ...(comparables.warnings.length ? { warnings: comparables.warnings } : {}),
+    } : {}),
+    ...(coordinateVersions.length ? { coordinateVersions } : {}),
+  };
+}
+export async function insertInWindows(actorId: string, runId: string, rows: Row<"asset_snapshot_rows">[], valuations: Row<"asset_valuations">[], deps: ImportDependencies) {
+  if (valuations.length !== rows.length) throw new Error("Mismatched asset import records");
+  const batches = Array.from({ length: Math.ceil(rows.length / 2000) }, (_, index) => ({ rows: rows.slice(index * 2000, (index + 1) * 2000), valuations: valuations.slice(index * 2000, (index + 1) * 2000) }));
+  // Two columnar payloads overlap hosted latency without exhausting the free
+  // pool. Each RPC atomically inserts its paired snapshot and valuation rows.
   for (let index = 0; index < batches.length; index += 2) {
-    await Promise.all(batches.slice(index, index + 2).map((batch) => deps.insertBatch(table, batch)));
+    await Promise.all(batches.slice(index, index + 2).map((batch) => deps.insertAssetBatch(actorId, runId, batch.rows, batch.valuations)));
   }
 }
 export function summarize(rows: readonly Row<"asset_snapshot_rows">[], values: readonly Row<"asset_valuations">[]) {
@@ -143,9 +180,9 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
     const validation = validateAssetRow(row, valuation, { existingAssets: (representatives.get(row.asset.noAset?.trim() ?? "") ?? []).map((entry) => entry.asset) });
     if (row.asset.unitInduk && ![unit.code, unit.name].some((name) => normalizeAssetText(name) === normalizeAssetText(row.asset.unitInduk))) validation.errors.push({ code: "UNIT_SCOPE_MISMATCH", severity: "ERROR", message: "Unit baris tidak sesuai dengan unit unggahan.", field: "unitInduk" });
     if (!assets[index].coordinates) validation.warnings.push({ code: "MISSING_GI_COORDINATES", severity: "WARNING", message: "Referensi koordinat GI tidak tersedia." });
-    const persisted = { ...Object.fromEntries(Object.entries(columnPairs).map(([field, column]) => [column, row.asset[field as keyof CanonicalAssetInput]])), id: rowIds[index], import_run_id: runId, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, import_sheet_id: sheet.id, source_row_number: row.provenance.rowNumber, provenance: asJson({ ...row.provenance, sources: row.sources }), error_codes: validation.errors.map((issue) => issue.code), warning_codes: [...new Set(validation.warnings.map((issue) => issue.code))], created_at: deps.now() } as Row<"asset_snapshot_rows">;
+    const persisted = { ...Object.fromEntries(Object.entries(columnPairs).map(([field, column]) => [column, row.asset[field as keyof CanonicalAssetInput]])), id: rowIds[index], import_run_id: runId, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, import_sheet_id: sheet.id, source_row_number: row.provenance.rowNumber, provenance: asJson(row.provenance), error_codes: validation.errors.map((issue) => issue.code), warning_codes: [...new Set(validation.warnings.map((issue) => issue.code))], created_at: deps.now() } as Row<"asset_snapshot_rows">;
     rows.push(persisted);
-    values.push({ asset_row_id: persisted.id, import_run_id: runId, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, nilai_abc: valuation.nilaiABC, harga_pengadaan_saat_ini: valuation.hargaPengadaanSaatIni, value_source: valuation.valueSource, calculation_method: valuation.calculationMethod, age_status: valuation.ageStatus, age_years: valuation.evidence.ageYears, useful_life_years: valuation.usefulLife.years, useful_life_rule_id: valuation.usefulLife.rule?.id ?? null, rule_version: diagnostics.data.ruleVersion, as_of: asOf, manual_approval_required: validation.manualApprovalRequired, approved_by: null, approved_at: null, approval_notes: null, selected_donor_ids: valuation.evidence.comparables?.selectedDonorIds ?? [], donor_evidence: asJson({ ...(valuation.evidence.comparables ?? {}), coordinateVersions: references.coordinateVersions }), calculation_evidence: asJson(valuation.evidence), warning_codes: persisted.warning_codes, created_at: deps.now() });
+    values.push({ asset_row_id: persisted.id, import_run_id: runId, unit_induk_id: session.unit_induk_id, dataset_version_id: version.id, nilai_abc: valuation.nilaiABC, harga_pengadaan_saat_ini: valuation.hargaPengadaanSaatIni, value_source: valuation.valueSource, calculation_method: valuation.calculationMethod, age_status: valuation.ageStatus, age_years: valuation.evidence.ageYears, useful_life_years: valuation.usefulLife.years, useful_life_rule_id: valuation.usefulLife.rule?.id ?? null, rule_version: diagnostics.data.ruleVersion, as_of: asOf, manual_approval_required: validation.manualApprovalRequired, approved_by: null, approved_at: null, approval_notes: null, selected_donor_ids: valuation.evidence.comparables?.selectedDonorIds ?? [], donor_evidence: asJson(compactDonorEvidence(valuation.evidence, references.coordinateVersions)), calculation_evidence: asJson(compactCalculationEvidence(valuation.evidence)), warning_codes: persisted.warning_codes, created_at: deps.now() });
   });
   phase("valued", rows.length);
   const expected = persistedRecordHashes(rows, values);
@@ -155,8 +192,7 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   catch { throw new ImportError("CONFLICT"); }
   phase("reserved", rows.length);
   try {
-    await insertInWindows("asset_snapshot_rows", rows, deps);
-    await insertInWindows("asset_valuations", values, deps);
+    await insertInWindows(actor.userId, runId, rows, values, deps);
     phase("inserted", rows.length);
     // The COMPLETE transition trigger recomputes persisted counts and hashes
     // in the database transaction. Avoid returning and downloading hundreds

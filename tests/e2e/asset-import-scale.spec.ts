@@ -69,7 +69,10 @@ test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
   let scenario: AssetScenario;
 
   test.beforeAll(async () => { scenario = await createAssetScenario(); });
-  test.afterAll(async () => { if (scenario) await cleanupAssetScenario(scenario, { timeoutMs: 600000 }); });
+  test.afterAll(async ({}, testInfo) => {
+    testInfo.setTimeout(600000);
+    if (scenario) await cleanupAssetScenario(scenario, { timeoutMs: 600000 });
+  });
 
   test("persists, reconciles and reloads every synthetic row inside the hosted limit", async ({ page }) => {
     test.setTimeout(900000);

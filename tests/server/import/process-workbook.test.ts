@@ -38,28 +38,33 @@ describe("authoritative workbook processing", () => {
     expect(persistedRecordHashes([{ ...rows[0], source_row_number: 2 }], values).rowsHash).not.toBe(hashes.rowsHash);
     expect(persistedRecordHashes(rows, [{ ...values[0], nilai_abc: 1 }]).valuationsHash).not.toBe(hashes.valuationsHash);
   });
-  it("writes 1001 rows in bounded complete batches", async () => {
-    const f = await prepared(Array.from({ length: 1001 }, (_, index) => assetRow.map((value, column) => column === 4 ? String(index).padStart(6, "0") : value)));
+  it("writes 2001 rows in bounded complete batches", async () => {
+    const f = await prepared(Array.from({ length: 2001 }, (_, index) => assetRow.map((value, column) => column === 4 ? String(index).padStart(6, "0") : value)));
     const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
-    expect(result.summary?.rowCount).toBe(1001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:1000", "insert:asset_snapshot_rows:1"]);
-    expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:1000", "insert:asset_valuations:1"]);
+    expect(result.summary?.rowCount).toBe(2001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:2000", "insert:asset_snapshot_rows:1"]);
+    expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:2000", "insert:asset_valuations:1"]);
   }, 30000);
-  it("caps batch insertion at two concurrent 1000-row payloads", async () => {
+  it("caps paired columnar insertion at two concurrent 2000-row payloads", async () => {
     let active = 0, maximum = 0;
     const sizes: number[] = [];
     const deps = {
-      insertBatch: async (_table: string, rows: unknown[]) => {
+      insertAssetBatch: async (_actorId: string, _runId: string, rows: unknown[], valuations: unknown[]) => {
         active += 1; maximum = Math.max(maximum, active); sizes.push(rows.length);
+        expect(valuations).toHaveLength(rows.length);
         await new Promise<void>((resolve) => setImmediate(resolve));
         active -= 1;
       },
-    } as unknown as Parameters<typeof insertInWindows>[2];
-    await insertInWindows("asset_snapshot_rows", Array.from({ length: 4501 }, (_, id) => ({ id })) as never, deps);
+    } as unknown as Parameters<typeof insertInWindows>[4];
+    const records = Array.from({ length: 4501 }, (_, id) => ({ id })) as never;
+    await insertInWindows("actor", "run", records, records, deps);
     expect(maximum).toBe(2);
-    expect(sizes).toEqual([1000, 1000, 1000, 1000, 501]);
+    expect(sizes).toEqual([2000, 2000, 501]);
   });
   it("downloads stored bytes, finalizes rows and summary, then permits submission without activation", async () => {
     const f = await prepared(); const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(f.tables.asset_snapshot_rows[0].provenance).toEqual({ sheetName: "DATA", rowNumber: 2 });
+    expect(f.tables.asset_valuations[0].calculation_evidence).toMatchObject({ sourceField: "nilaiBukuSap", sourceAddress: "M2", ageYears: 10 });
+    expect(JSON.stringify(f.tables.asset_valuations[0].calculation_evidence)).not.toMatch(/sourceCell|policy|rawValue/);
     expect(result.stage).toBe("READY_TO_SUBMIT"); expect(f.tables.asset_snapshot_rows[0].no_aset).toBe("000002"); expect(f.tables.asset_valuations[0].nilai_abc).toBe(0);
     expect(f.tables.import_sessions[0].current_run_id).toBe(f.tables.asset_import_runs[0].id);
     expect(f.events.indexOf("finalize")).toBeGreaterThan(f.events.indexOf("insert:asset_valuations:1"));
@@ -107,8 +112,8 @@ describe("authoritative workbook processing", () => {
     await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" });
   });
   it("detects incomplete persisted batches before finalization", async () => {
-    const f = await prepared(), insertBatch = f.deps.insertBatch;
-    f.deps.insertBatch = async (table, rows) => { if (table !== "asset_valuations") await insertBatch(table, rows); };
+    const f = await prepared();
+    f.deps.insertAssetBatch = async (_actorId, _runId, rows) => { await f.deps.insert("asset_snapshot_rows", rows); };
     await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
     expect(f.events).toContain("finalize");
     expect(f.tables.asset_import_runs[0].status).toBe("FAILED");
