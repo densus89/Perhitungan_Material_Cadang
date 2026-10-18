@@ -40,6 +40,16 @@ describe("import mutation boundary", () => {
     vi.stubEnv("VERCEL_ENV", environment); vi.stubEnv("VERCEL", vercel); vi.stubEnv("VERCEL_URL", url);
     expect((await assetImportMutation(request(createInput, origin), createImportSchema, accepted)).status).toBe(status);
   });
+  it.each([
+    { origin: "https://asset-preview-123-team.vercel.app", status: 200 },
+    { origin: "https://asset-git-feature-team.vercel.app", status: 200 },
+    { origin: "https://asset-git-other-team.vercel.app", status: 403 },
+  ])("accepts only exact deployment or branch system origins %#", async ({ origin, status }) => {
+    vi.stubEnv("VERCEL", "1"); vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_URL", "asset-preview-123-team.vercel.app");
+    vi.stubEnv("VERCEL_BRANCH_URL", "asset-git-feature-team.vercel.app");
+    expect((await assetImportMutation(request(createInput, origin), createImportSchema, accepted)).status).toBe(status);
+  });
   it.each([undefined, "", "https://asset-preview.vercel.app", "asset-preview.vercel.app/", "asset-preview.vercel.app/path", "asset-preview.vercel.app?query=1", "asset-preview.vercel.app#fragment", "actor@asset-preview.vercel.app", "asset-preview.vercel.app:443", "asset-preview.vercel.app.evil.example", "evil.example", "asset-preview.vercel.app\n", "UPPER.vercel.app", "-asset.vercel.app", "asset-.vercel.app"])("fails closed for malformed preview configuration %#", async url => {
     vi.stubEnv("VERCEL", "1"); vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("VERCEL_URL", url);
     expect((await assetImportMutation(request(createInput), createImportSchema, accepted)).status).toBe(403);
