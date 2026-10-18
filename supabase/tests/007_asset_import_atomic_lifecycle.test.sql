@@ -28,24 +28,16 @@ create function pg_temp.reserve(s integer,r integer,h text default repeat('b',64
 create function pg_temp.finalize(s integer,r integer) returns uuid language plpgsql as $$begin
  perform public.insert_asset_import_batch(
   pg_temp.uid(1,1),pg_temp.uid(8,r),
-  jsonb_build_object(
-   'id',jsonb_build_array(pg_temp.uid(9,r)),'import_run_id',jsonb_build_array(pg_temp.uid(8,r)),
-   'unit_induk_id',jsonb_build_array(pg_temp.uid(2,1)),'dataset_version_id',jsonb_build_array(pg_temp.uid(4,s)),
-   'import_sheet_id',jsonb_build_array(pg_temp.uid(7,s)),'source_row_number',jsonb_build_array(2),
-   'no_aset',jsonb_build_array('SYNTHETIC'),'kondisi_aset',jsonb_build_array('P2'),
-   'provenance',jsonb_build_array('{}'::jsonb),'error_codes',jsonb_build_array('[]'::jsonb),
-   'warning_codes',jsonb_build_array('[]'::jsonb),'created_at',jsonb_build_array(now())
-  ),
-  jsonb_build_object(
-   'asset_row_id',jsonb_build_array(pg_temp.uid(9,r)),'import_run_id',jsonb_build_array(pg_temp.uid(8,r)),
-   'unit_induk_id',jsonb_build_array(pg_temp.uid(2,1)),'dataset_version_id',jsonb_build_array(pg_temp.uid(4,s)),
-   'nilai_abc',jsonb_build_array(0),'value_source',jsonb_build_array('SAP_BOOK_VALUE'),
-   'calculation_method',jsonb_build_array('DIRECT_BOOK_VALUE'),'age_status',jsonb_build_array('PROVIDED_AGE'),
-   'rule_version',jsonb_build_array('test'),'as_of',jsonb_build_array('2026-10-16'),
-   'manual_approval_required',jsonb_build_array(false),'selected_donor_ids',jsonb_build_array('[]'::jsonb),
-   'donor_evidence',jsonb_build_array('{}'::jsonb),'calculation_evidence',jsonb_build_array('{}'::jsonb),
-   'warning_codes',jsonb_build_array('[]'::jsonb),'created_at',jsonb_build_array(now())
-  )
+  jsonb_build_array(jsonb_build_array(
+   pg_temp.uid(9,r),pg_temp.uid(8,r),pg_temp.uid(2,1),pg_temp.uid(4,s),pg_temp.uid(7,s),2,
+   null,null,null,null,null,'SYNTHETIC',null,null,null,null,'P2',null,null,null,null,null,
+   0,null,null,null,null,null,'{}'::jsonb,'[]'::jsonb,'[]'::jsonb,now()
+  )),
+  jsonb_build_array(jsonb_build_array(
+   pg_temp.uid(9,r),pg_temp.uid(8,r),pg_temp.uid(2,1),pg_temp.uid(4,s),0,null,
+   'SAP_BOOK_VALUE','DIRECT_BOOK_VALUE','PROVIDED_AGE',null,null,null,'test','2026-10-16',false,
+   null,null,null,'[]'::jsonb,'{}'::jsonb,'{}'::jsonb,'[]'::jsonb,now()
+  ))
  );
  update public.asset_import_runs r0 set expected_rows_hash=h.rows_hash,expected_valuations_hash=h.valuations_hash from private.asset_run_hashes(pg_temp.uid(8,r))h where r0.id=pg_temp.uid(8,r);
  return public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,r));

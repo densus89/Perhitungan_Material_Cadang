@@ -35,11 +35,25 @@ export interface ImportDependencies {
   submit(actorId: string, versionId: string, expected: ExpectedSubmission): Promise<void>;
 }
 
-export function columnarRecords(records: Record<string, unknown>[]): Json {
-  if (!records.length) throw new Error("Empty columnar batch");
-  const keys = Object.keys(records[0]);
-  if (!keys.length || records.some((record) => Object.keys(record).length !== keys.length || keys.some((key) => !(key in record)))) throw new Error("Inconsistent columnar batch");
-  return Object.fromEntries(keys.map((key) => [key, records.map((record) => record[key] === undefined ? null : record[key])])) as Json;
+export const ASSET_ROW_BATCH_COLUMNS = [
+  "id", "import_run_id", "unit_induk_id", "dataset_version_id", "import_sheet_id", "source_row_number",
+  "unit_induk", "upt", "nama_gi", "bay_penghantar", "tid", "no_aset", "nama_peralatan", "spesifikasi_mara",
+  "jumlah", "satuan", "kondisi_aset", "tanggal_operasi", "usia_aset_tahun", "kode_class_asset", "kode_jenis",
+  "kode_subjenis", "nilai_buku_sap", "harga_pengadaan_saat_ini", "tanggal_referensi_harga", "nilai_abc_input",
+  "kode_material", "keterangan", "provenance", "error_codes", "warning_codes", "created_at",
+] as const satisfies readonly (keyof Insert<"asset_snapshot_rows">)[];
+
+export const ASSET_VALUATION_BATCH_COLUMNS = [
+  "asset_row_id", "import_run_id", "unit_induk_id", "dataset_version_id", "nilai_abc", "harga_pengadaan_saat_ini",
+  "value_source", "calculation_method", "age_status", "age_years", "useful_life_years", "useful_life_rule_id",
+  "rule_version", "as_of", "manual_approval_required", "approved_by", "approved_at", "approval_notes",
+  "selected_donor_ids", "donor_evidence", "calculation_evidence", "warning_codes", "created_at",
+] as const satisfies readonly (keyof Insert<"asset_valuations">)[];
+
+export function packedRecords(records: Record<string, unknown>[], columns: readonly string[]): Json {
+  if (!records.length || !columns.length) throw new Error("Empty packed batch");
+  if (records.some((record) => Object.keys(record).length !== columns.length || columns.some((column) => !(column in record)))) throw new Error("Inconsistent packed batch");
+  return records.map((record) => columns.map((column) => record[column] === undefined ? null : record[column])) as Json;
 }
 
 /** The generic adapter never takes its table/filters from a request body. */
@@ -114,12 +128,12 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (count !== rows.length) throw new Error("Incomplete import batch");
     },
     async insertAssetBatch(actorId, runId, rows, valuations) {
-      if (!rows.length || rows.length > 1000 || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
+      if (!rows.length || rows.length > 2000 || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
       const { data, error } = await client.rpc("insert_asset_import_batch", {
         p_actor_id: actorId,
         p_run_id: runId,
-        p_rows: columnarRecords(rows as Record<string, unknown>[]),
-        p_valuations: columnarRecords(valuations as Record<string, unknown>[]),
+        p_rows: packedRecords(rows as Record<string, unknown>[], ASSET_ROW_BATCH_COLUMNS),
+        p_valuations: packedRecords(valuations as Record<string, unknown>[], ASSET_VALUATION_BATCH_COLUMNS),
       });
       if (error || data !== rows.length) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "insertAssetBatch", code: error?.code ?? "COUNT_MISMATCH" }));
       check(error);
