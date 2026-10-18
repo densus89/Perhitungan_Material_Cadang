@@ -22,7 +22,7 @@ describe("import persistence adapter", () => {
     expect(call.p_rows[0][ASSET_ROW_BATCH_COLUMNS.indexOf("id")]).toBe("r1");
     expect(call.p_rows[1][ASSET_ROW_BATCH_COLUMNS.indexOf("import_run_id")]).toBe("run");
     expect(call.p_valuations[1][ASSET_VALUATION_BATCH_COLUMNS.indexOf("asset_row_id")]).toBe("r2");
-    await expect(deps.insertAssetBatch("actor", "run", Array.from({ length: 2001 }, () => rows[0]), Array.from({ length: 2001 }, () => valuations[0]))).rejects.toThrow("Invalid asset import batch");
+    await expect(deps.insertAssetBatch("actor", "run", Array.from({ length: 3001 }, () => rows[0]), Array.from({ length: 3001 }, () => valuations[0]))).rejects.toThrow("Invalid asset import batch");
   });
   it("reads every PostgREST page in bounded parallel windows and preserves order", async () => {
     const source = Array.from({ length: 9001 }, (_, index) => ({ id: String(index).padStart(5, "0") }));

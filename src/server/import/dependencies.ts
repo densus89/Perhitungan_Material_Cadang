@@ -128,7 +128,7 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (count !== rows.length) throw new Error("Incomplete import batch");
     },
     async insertAssetBatch(actorId, runId, rows, valuations) {
-      if (!rows.length || rows.length > 2000 || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
+      if (!rows.length || rows.length > 3000 || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
       const { data, error } = await client.rpc("insert_asset_import_batch", {
         p_actor_id: actorId,
         p_run_id: runId,
