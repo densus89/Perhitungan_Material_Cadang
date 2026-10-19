@@ -3,6 +3,15 @@ create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 select no_plan();
 
+select ok(coalesce((select relrowsecurity from pg_class where oid=to_regclass('public.asset_import_chunks')),false),'Manifest has RLS');
+select ok(coalesce((select not has_table_privilege('service_role',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') from pg_class c where c.oid=to_regclass('public.asset_import_chunks')),false),'Service cannot directly write manifest');
+select ok(coalesce((select not has_table_privilege('authenticated',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') from pg_class c where c.oid=to_regclass('public.asset_import_chunks')),false),'Browser cannot directly write manifest');
+select ok(coalesce((select not has_column_privilege('authenticated',c.oid,a.attnum,'SELECT') from pg_class c join pg_attribute a on a.attrelid=c.oid where c.oid='public.asset_import_runs'::regclass and a.attname='processing_lease_token'),false),'Browser cannot read bearer lease token');
+select ok(coalesce((select not has_column_privilege('service_role',c.oid,a.attnum,'INSERT,UPDATE') from pg_class c join pg_attribute a on a.attrelid=c.oid where c.oid='public.asset_import_runs'::regclass and a.attname='processing_lease_token'),false),'Service cannot forge lease directly');
+select ok(coalesce((select p.prosecdef and p.proconfig @> array['search_path=""'] and has_function_privilege('service_role',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('anon',p.oid,'EXECUTE') from pg_proc p where p.oid=to_regprocedure(signature)),false),'Hardened service-only resumable RPC: '||signature)
+from(values ('public.claim_asset_import_processing(uuid,uuid,uuid,jsonb,uuid)'),('public.commit_asset_import_chunk(uuid,uuid,uuid,integer,integer,jsonb,jsonb,text,text)'),('public.release_asset_import_processing(uuid,uuid,uuid)'),('public.finalize_asset_import_run(uuid,uuid,uuid)'),('public.fail_asset_import_run(uuid,uuid,uuid)')) f(signature);
+select ok(coalesce((select not has_function_privilege('service_role',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE') from pg_proc p where p.oid=to_regprocedure('private.insert_asset_packed_pairs(uuid,uuid,jsonb,jsonb)')),false),'Private decoder cannot bypass lease through direct service invocation');
+
 insert into auth.users(id,email) values
  ('50000000-0000-4000-8000-000000000001','asset.operator.a@pln.co.id'),
  ('50000000-0000-4000-8000-000000000002','asset.operator.b@pln.co.id'),

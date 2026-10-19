@@ -120,5 +120,103 @@ select is((select count(*) from public.asset_import_run_metadata),3::bigint,'Ass
 reset role;
 select ok(not has_function_privilege('authenticated',signature,'EXECUTE') and has_function_privilege('service_role',signature,'EXECUTE'),'Actor-checked service-only RPC: '||signature) from(values
  ('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'),('public.replace_asset_import_mapping(uuid,uuid,uuid,uuid,jsonb,text,text,text,text)'),('public.reserve_asset_import_run(uuid,uuid,uuid,jsonb)'),('public.fail_asset_import_run(uuid,uuid)'),('public.complete_asset_import_comparison(uuid,uuid,uuid,uuid)'),('public.submit_asset_version(uuid,uuid,uuid,uuid,text,uuid,uuid)'))f(signature);
+-- The third session is isolated from the legacy compatibility cases above.
+create function pg_temp.resume_payload() returns jsonb language sql as $$
+ select pg_temp.payload(5)||jsonb_build_object('expected_row_count',2001,'expected_valuation_count',2001)
+$$;
+create function pg_temp.claim(t uuid default null) returns jsonb language sql as $$
+ select public.claim_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(6,3),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,3)),pg_temp.resume_payload(),t)
+$$;
+create function pg_temp.rows(first_row integer,n integer) returns jsonb language sql as $$
+ select jsonb_agg(jsonb_build_array(pg_temp.uid(11,i),pg_temp.uid(8,5),pg_temp.uid(2,1),pg_temp.uid(4,3),pg_temp.uid(7,3),i+2,
+ null,null,null,null,null,'SYNTHETIC-'||i,null,null,null,null,'P2',null,null,null,null,null,0,null,null,null,null,null,'{}'::jsonb,'[]'::jsonb,'[]'::jsonb,'2026-10-19T00:00:00Z'))
+ from generate_series(first_row,first_row+n-1)i
+$$;
+create function pg_temp.vals(first_row integer,n integer) returns jsonb language sql as $$
+ select jsonb_agg(jsonb_build_array(pg_temp.uid(11,i),pg_temp.uid(8,5),pg_temp.uid(2,1),pg_temp.uid(4,3),0,null,'SAP_BOOK_VALUE','DIRECT_BOOK_VALUE','PROVIDED_AGE',null,null,null,'test','2026-10-16',false,null,null,null,'[]'::jsonb,'{}'::jsonb,'{}'::jsonb,'[]'::jsonb,'2026-10-19T00:00:00Z'))
+ from generate_series(first_row,first_row+n-1)i
+$$;
+create temporary table lease_evidence(name text primary key,token uuid);
+create function pg_temp.token(k text default 'current') returns uuid language sql as $$select token from lease_evidence where name=k$$;
+create function pg_temp.chunk(i integer,t uuid default null) returns integer language sql as $$
+ select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),coalesce(t,pg_temp.token()),i,i*2000,pg_temp.rows(i*2000,least(2000,2001-i*2000)),pg_temp.vals(i*2000,least(2000,2001-i*2000)),repeat('c',64),repeat('d',64))
+$$;
+select lives_ok($$select pg_temp.replace_mapping(3)$$,'Resumable mapping fixture');
+select lives_ok($$insert into lease_evidence select 'current',(pg_temp.claim()->>'processing_lease_token')::uuid$$,'Claim creates new resumable run');
+select is((select processing_protocol_version from public.asset_import_runs where id=pg_temp.uid(8,5)),'resumable-v1','New claim uses explicit protocol');
+select is((select processing_attempts from public.asset_import_runs where id=pg_temp.uid(8,5)),1,'Initial claim counts an attempt');
+select throws_ok($$update public.asset_import_runs set processing_attempts=-1 where id=pg_temp.uid(8,5)$$,'23514',null,'Attempts cannot be negative');
+select throws_ok($$update public.asset_import_runs set processing_protocol_version='unknown-v1' where id=pg_temp.uid(8,5)$$,'23514',null,'Unknown protocol rejected');
+select ok((select processing_lease_expires_at>clock_timestamp() and processing_lease_expires_at<=clock_timestamp()+interval '240 seconds' from public.asset_import_runs where id=pg_temp.uid(8,5)),'Lease bounded at 240 seconds');
+select throws_ok($$select pg_temp.claim()$$,'22023',null,'Another claimant conflicts with active lease');
+select lives_ok($$select (pg_temp.claim(pg_temp.token())->>'id') is not null$$,'Owner may renew same lease');
+select throws_ok($$select public.claim_asset_import_processing(pg_temp.uid(1,3),pg_temp.uid(6,3),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,3)),pg_temp.resume_payload(),null)$$,'42501',null,'Unassigned operator cannot claim');
+select throws_ok($$select public.claim_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(6,3),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,3)),pg_temp.resume_payload()||jsonb_build_object('expected_rows_hash',repeat('f',64)),pg_temp.token())$$,'22023',null,'Resume rejects changed expectations');
+select throws_ok(format('select public.claim_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(6,3),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,3)),pg_temp.resume_payload()||jsonb_build_object(%L,%L),pg_temp.token())',field,value),'22023',null,'Resume rejects changed '||field)
+ from(values('source_hash',repeat('f',64)),('mapping_hash',repeat('f',64)),('rule_version','other-rule')) mismatch(field,value);
+select throws_ok($$select public.claim_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(6,3),pg_temp.uid(99,9),pg_temp.resume_payload(),pg_temp.token())$$,'22023',null,'Resume rejects stale mapping revision');
+select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'22023',null,'Cannot finalize without manifest');
+select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5))$$,'22023',null,'Legacy finalize cannot bypass lease');
+select throws_ok($$select public.fail_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5))$$,'22023',null,'Legacy fail cannot steal active lease');
+select throws_ok($$select public.insert_asset_import_batch(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.rows(0,1),pg_temp.vals(0,1))$$,'22023',null,'Legacy insertion cannot bypass manifest');
+insert into lease_evidence select 'stale',pg_temp.token();
+update public.asset_import_runs set processing_lease_expires_at=clock_timestamp()-interval '1 second' where id=pg_temp.uid(8,5);
+select throws_ok($$select pg_temp.chunk(1)$$,'22023',null,'Expired lease cannot commit');
+select throws_ok($$select pg_temp.claim(pg_temp.token())$$,'22023',null,'Expired token cannot renew itself');
+select lives_ok($$update lease_evidence set token=(pg_temp.claim()->>'processing_lease_token')::uuid where name='current'$$,'Expired lease can be reclaimed');
+select ok(pg_temp.token()<>pg_temp.token('stale'),'Reclaim rotates token');
+select throws_ok($$select pg_temp.chunk(1,pg_temp.token('stale'))$$,'22023',null,'Stale owner cannot commit after reclaim');
+select throws_ok($$select public.release_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token('stale'))$$,'22023',null,'Stale owner cannot release');
+select throws_ok($$select public.fail_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token('stale'))$$,'22023',null,'Stale owner cannot fail');
+select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token('stale'))$$,'22023',null,'Stale owner cannot finalize');
+select throws_ok($$select public.release_asset_import_processing(pg_temp.uid(1,3),pg_temp.uid(8,5),pg_temp.token())$$,'42501',null,'Unassigned operator cannot release an owned lease');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,3),pg_temp.uid(8,5),pg_temp.token(),1,2000,pg_temp.rows(2000,1),pg_temp.vals(2000,1),repeat('c',64),repeat('d',64))$$,'42501',null,'Unassigned operator cannot commit with a known token');
+select throws_ok($$insert into public.asset_import_chunks(import_run_id,unit_induk_id,chunk_index,start_ordinal,row_count,rows_hash,valuations_hash,completed_by) values(pg_temp.uid(8,5),pg_temp.uid(2,1),-1,-2000,2000,repeat('c',64),repeat('d',64),pg_temp.uid(1,1))$$,'23514',null,'Manifest cannot contain a negative chunk index');
+select throws_ok($$insert into public.asset_import_chunks(import_run_id,unit_induk_id,chunk_index,start_ordinal,row_count,rows_hash,valuations_hash,completed_by) values(pg_temp.uid(8,5),pg_temp.uid(2,1),1,0,2000,repeat('c',64),repeat('d',64),pg_temp.uid(1,1))$$,'23514',null,'Manifest start ordinal must match chunk index');
+select throws_ok($$insert into public.asset_import_chunks(import_run_id,unit_induk_id,chunk_index,start_ordinal,row_count,rows_hash,valuations_hash,completed_by) values(pg_temp.uid(8,5),pg_temp.uid(2,1),1,2000,1,repeat('z',64),repeat('d',64),pg_temp.uid(1,1))$$,'23514',null,'Manifest requires hexadecimal SHA-256 hashes');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),2,4000,pg_temp.rows(2000,1),pg_temp.vals(2000,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Chunk outside expected range rejected');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,1999,pg_temp.rows(2000,1),pg_temp.vals(2000,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Wrong start ordinal rejected');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),0,0,pg_temp.rows(0,2001),pg_temp.vals(0,2001),repeat('c',64),repeat('d',64))$$,'22023',null,'Chunk cannot exceed 2000 pairs');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,pg_temp.rows(2000,1),pg_temp.vals(1999,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Unpaired row and valuation rejected');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,pg_temp.rows(2000,1),jsonb_set(pg_temp.vals(2000,1),'{0,4}','-1'),repeat('c',64),repeat('d',64))$$,'23514',null,'Valuation failure rolls back paired row and marker');
+select is((select count(*) from public.asset_snapshot_rows where import_run_id=pg_temp.uid(8,5)),0::bigint,'Failed commit leaves no rows');
+select is((select count(*) from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5)),0::bigint,'Failed commit leaves no marker');
+select is(pg_temp.chunk(1),1,'Tail chunk commits paired data and marker');
+select is((select row_count from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5) and chunk_index=1),1,'Tail marker persisted');
+select is((select count(*) from public.asset_valuations where import_run_id=pg_temp.uid(8,5)),1::bigint,'Tail valuation committed atomically');
+select is(pg_temp.chunk(1),1,'Response-lost retry is idempotent');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,'[[]]',pg_temp.vals(2000,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Replay still validates packed row shape');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,pg_temp.rows(2000,1),pg_temp.vals(1999,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Replay still validates row/valuation pairing');
+select is((select count(*) from public.asset_valuations where import_run_id=pg_temp.uid(8,5)),1::bigint,'Identical replay does not duplicate valuations');
+select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,pg_temp.rows(2000,1),pg_temp.vals(2000,1),repeat('f',64),repeat('d',64))$$,'22023',null,'Changed replay hash rejected');
+select throws_ok($$update public.asset_import_chunks set rows_hash=repeat('f',64) where import_run_id=pg_temp.uid(8,5)$$,'22023',null,'Completed marker cannot be rewritten');
+select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'22023',null,'Gap in manifest prevents finalization');
+select is(pg_temp.chunk(0),2000,'Full 2000-pair chunk commits');
+select is((select count(*) from public.asset_snapshot_rows where import_run_id=pg_temp.uid(8,5)),2001::bigint,'Exact paired row total persisted');
+select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'22023',null,'Complete manifest cannot bypass global hash check');
+select lives_ok($$select public.release_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'Current owner releases lease');
+select throws_ok($$select pg_temp.chunk(1)$$,'22023',null,'Released token cannot replay');
+create temporary table resume_state as select pg_temp.claim() state;
+update lease_evidence set token=(select (state->>'processing_lease_token')::uuid from resume_state) where name='current';
+select is((select jsonb_array_length(state->'completed_chunks') from resume_state),2,'Resume reports durable completed manifest');
+select is(pg_temp.chunk(0),2000,'Committed chunk replay survives lease handoff');
+update public.asset_import_runs r set expected_rows_hash=h.rows_hash,expected_valuations_hash=h.valuations_hash from private.asset_run_hashes(pg_temp.uid(8,5))h where r.id=pg_temp.uid(8,5);
+select lives_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'Exact manifest counts and hashes finalize');
+select is((select status::text from public.asset_import_runs where id=pg_temp.uid(8,5)),'COMPLETE','Resumable run completed');
+select is((select summary->>'rowCount' from public.asset_import_run_metadata where import_run_id=pg_temp.uid(8,5)),'2001','Final summary derives from complete persisted data');
+select is((select count(*) from public.audit_events where action='ASSET_IMPORT_FINALIZED' and details->>'import_run_id'=pg_temp.uid(8,5)::text),1::bigint,'Finalization audited once');
+select lives_ok($$select public.release_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'Owner can release after finalization');
+select set_config('request.jwt.claim.sub',pg_temp.uid(1,3)::text,true);
+set local role authenticated;
+select is((select count(*) from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5)),0::bigint,'Unassigned operator cannot read manifest');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.uid(1,1)::text,true);
+set local role authenticated;
+select is((select count(*) from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5)),2::bigint,'Assigned operator reads durable manifest');
+reset role;
+select lives_ok($$select public.claim_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(6,2),(select mapping_revision from public.import_sessions where id=pg_temp.uid(6,2)),pg_temp.payload(6),null)$$,'Separate resumable run for expired failure');
+update public.asset_import_runs set processing_lease_expires_at=clock_timestamp()-interval '1 second' where id=pg_temp.uid(8,6);
+select lives_ok($$select public.fail_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,6),null)$$,'Expired lease can fail with no token');
+select is((select status::text from public.asset_import_runs where id=pg_temp.uid(8,6)),'FAILED','Expired failure is persisted');
 select * from finish();
 rollback;

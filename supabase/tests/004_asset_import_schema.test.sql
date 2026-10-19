@@ -2,7 +2,29 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 -- Explicit identifier types/descriptions prevent selecting a different pgTAP overload.
-select extensions.plan(51);
+select extensions.no_plan();
+
+select has_table('public','asset_import_chunks','Durable chunk manifest exists');
+select columns_are('public','asset_import_chunks',array['import_run_id','unit_induk_id','chunk_index','start_ordinal','row_count','rows_hash','valuations_hash','completed_at','completed_by'],'Manifest has exact protocol columns');
+select col_is_pk('public','asset_import_chunks',array['import_run_id','chunk_index'],'One marker per run chunk');
+select col_is_unique('public','asset_import_chunks',array['import_run_id','start_ordinal'],'One marker per run ordinal');
+select has_trigger('public','asset_import_chunks','guard_asset_import_chunk','Manifest evidence is immutable');
+select has_column('public','asset_import_runs',c,'Run protocol column: '||c) from unnest(array['processing_protocol_version','processing_lease_token','processing_lease_expires_at','last_progress_at','processing_attempts']) c;
+select col_not_null('public','asset_import_runs','processing_protocol_version','Protocol always explicit');
+select col_default_is('public','asset_import_runs','processing_protocol_version','legacy-v1','Historical insert defaults to legacy');
+select col_default_is('public','asset_import_runs','processing_attempts','0','Attempt default is zero');
+select col_is_null('public','asset_import_runs','processing_lease_token','Unclaimed run has nullable lease');
+select col_type_is('public','asset_import_runs','processing_lease_token','uuid','Lease uses opaque UUID');
+select col_type_is('public','asset_import_runs','processing_lease_expires_at','timestamp with time zone','Lease expiry is timezone aware');
+select col_not_null('public','asset_import_chunks',c,'Required chunk evidence: '||c) from unnest(array['import_run_id','unit_induk_id','chunk_index','start_ordinal','row_count','rows_hash','valuations_hash','completed_at','completed_by']) c;
+select has_check('public','asset_import_chunks','Manifest bounds and hashes are checked');
+select fk_ok('public','asset_import_chunks',array['import_run_id','unit_induk_id'],'public','asset_import_runs',array['id','unit_induk_id'],'Manifest ownership includes unit');
+select fk_ok('public','asset_import_chunks','completed_by','public','profiles','id','Completing actor is relational');
+select has_function('public','claim_asset_import_processing',array['uuid','uuid','uuid','jsonb','uuid'],'Claim or renew a bounded lease');
+select has_function('public','commit_asset_import_chunk',array['uuid','uuid','uuid','integer','integer','jsonb','jsonb','text','text'],'Atomic paired chunk commit');
+select has_function('public','release_asset_import_processing',array['uuid','uuid','uuid'],'Release own lease');
+select is((select p.prorettype::regtype::text from pg_proc p where p.oid=to_regprocedure(signature)),result_type,'RPC return contract: '||signature)
+ from(values('public.claim_asset_import_processing(uuid,uuid,uuid,jsonb,uuid)','jsonb'),('public.commit_asset_import_chunk(uuid,uuid,uuid,integer,integer,jsonb,jsonb,text,text)','integer'),('public.release_asset_import_processing(uuid,uuid,uuid)','uuid')) contract(signature,result_type);
 
 select extensions.has_enum('public'::name,'asset_import_run_status'::name,'Import run status enum exists'::text);
 select extensions.enum_has_labels('public'::name,'asset_import_run_status'::name,array['PROCESSING','FAILED','COMPLETE']::name[],'Enum labels match asset_import_run_status'::text);
@@ -27,12 +49,12 @@ select extensions.has_index('public'::name,'asset_snapshot_rows'::name,'asset_ro
 select extensions.has_trigger('public'::name,'asset_snapshot_rows'::name,'guard_asset_rows_insert'::name,'Snapshot inserts use a statement-level batch guard');
 select extensions.has_trigger('public'::name,'asset_valuations'::name,'guard_asset_valuations_insert'::name,'Valuation inserts use a statement-level batch guard');
 select extensions.ok(strpos(pg_get_functiondef('private.guard_asset_insert_statement()'::regprocedure),'pg_advisory_xact_lock_shared')>0,'Insert batches share a run-scoped lifecycle lock');
-select extensions.ok(strpos(pg_get_functiondef('public.finalize_asset_import_run(uuid,uuid)'::regprocedure),'pg_advisory_xact_lock(')>0,'Finalization takes the exclusive run-scoped lifecycle lock');
-select extensions.ok(strpos(pg_get_functiondef('public.fail_asset_import_run(uuid,uuid)'::regprocedure),'pg_advisory_xact_lock(')>0,'Failure takes the exclusive run-scoped lifecycle lock');
+select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('public.finalize_asset_import_run(uuid,uuid,uuid'))),'pg_advisory_xact_lock(')>0,'Finalization takes the exclusive run-scoped lifecycle lock');
+select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('public.fail_asset_import_run(uuid,uuid,uuid'))),'pg_advisory_xact_lock(')>0,'Failure takes the exclusive run-scoped lifecycle lock');
 select extensions.has_function('public'::name,'insert_asset_import_batch'::name,array['uuid','uuid','jsonb','jsonb']::name[],'Packed asset batch RPC exists');
-select extensions.ok(strpos(regexp_replace(pg_get_functiondef('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure),'[[:space:]]','','g'),'row_count>3000')>0,'Packed asset RPC enforces the hosted-safe 3000-row limit');
-select extensions.ok(strpos(pg_get_functiondef('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure),'jsonb_array_elements(p_rows)')>0,'Packed asset RPC decodes rows in one linear set-based pass');
-select extensions.ok(strpos(pg_get_functiondef('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure),'jsonb_object_agg')=0,'Packed asset RPC avoids quadratic column-array indexing');
+select extensions.ok(strpos(regexp_replace(pg_get_functiondef('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure),'[[:space:]]','','g'),'row_count>2000')>0,'Packed asset RPC enforces the 2000-row limit');
+select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('private.insert_asset_packed_pairs(uuid,uuid,jsonb,jsonb)')),'jsonb_array_elements(p_rows)')>0,'Packed asset RPC decoder uses a linear set-based pass');
+select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('private.insert_asset_packed_pairs(uuid,uuid,jsonb,jsonb)')),'jsonb_object_agg')=0,'Packed asset RPC decoder avoids quadratic column-array indexing');
 select extensions.ok(exists(select 1 from pg_proc p cross join lateral unnest(coalesce(p.proconfig,'{}')) config where p.oid='public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure and config='statement_timeout=60s'),'Packed asset RPC has a bounded 60-second function timeout');
 select extensions.has_index('public'::name,'asset_valuations'::name,'asset_valuations_warnings_gin'::name,array['warning_codes']::name[],'Index asset_valuations_warnings_gin covers expected columns'::text);
 select extensions.is((select am.amname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_am am on am.oid=c.relam
