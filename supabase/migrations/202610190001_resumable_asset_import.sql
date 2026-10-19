@@ -29,14 +29,32 @@ alter table public.asset_import_chunks enable row level security;
 create policy asset_import_chunks_read on public.asset_import_chunks for select to authenticated using(private.can_access_unit(unit_induk_id));
 revoke all on public.asset_import_chunks from public,anon,authenticated,service_role;
 grant select on public.asset_import_chunks to authenticated,service_role;
--- Lease and paired data writes must go through actor-checked RPCs. Existing
--- controlled DELETE cleanup and review approval paths retain their grants.
+-- Lease and paired data writes must go through actor-checked RPCs. Pair cleanup
+-- remains an owner/admin operation; service review can append approval only.
 revoke insert,update on public.asset_import_runs from service_role;
 grant insert(id,import_session_id,unit_induk_id,dataset_version_id,status,expected_row_count,expected_valuation_count,source_hash,mapping_hash,rule_version,expected_rows_hash,expected_valuations_hash,finalized_rows_hash,finalized_valuations_hash,failure_code,created_by,created_at,completed_at,mapping_revision) on public.asset_import_runs to service_role;
-revoke insert on public.asset_snapshot_rows,public.asset_valuations from service_role;
+revoke insert,update,delete on public.asset_snapshot_rows,public.asset_valuations from service_role;
+grant update(approved_by,approved_at,approval_notes) on public.asset_valuations to service_role;
 -- A table-level SELECT grant would automatically expose the new bearer token.
 revoke select on public.asset_import_runs from authenticated;
 grant select(id,import_session_id,unit_induk_id,dataset_version_id,status,expected_row_count,expected_valuation_count,source_hash,mapping_hash,rule_version,expected_rows_hash,expected_valuations_hash,finalized_rows_hash,finalized_valuations_hash,failure_code,created_by,created_at,completed_at,mapping_revision,processing_protocol_version,processing_lease_expires_at,last_progress_at,processing_attempts) on public.asset_import_runs to authenticated;
+
+-- Alphabetically follows guard_asset_rows/guard_asset_valuations, which already
+-- lock the parent run and enforce the append-once COMPLETE review branch. The
+-- narrow approval column grant must not permit approval_notes-only changes to
+-- committed PROCESSING chunks. Owner cleanup still uses DELETE, never UPDATE.
+create function private.guard_resumable_asset_update() returns trigger
+language plpgsql security definer set search_path='' as $$
+begin
+ if exists(select 1 from public.asset_import_runs where id=old.import_run_id
+   and processing_protocol_version='resumable-v1' and status='PROCESSING') then
+  raise exception 'Resumable processing evidence is append-only' using errcode='42501';
+ end if;
+ return new;
+end$$;
+create trigger guard_resumable_asset_update before update on public.asset_snapshot_rows for each row execute function private.guard_resumable_asset_update();
+create trigger guard_resumable_asset_update before update on public.asset_valuations for each row execute function private.guard_resumable_asset_update();
+revoke all on function private.guard_resumable_asset_update() from public,anon,authenticated,service_role;
 
 create function private.guard_asset_import_chunk() returns trigger
 language plpgsql security definer set search_path='' as $$

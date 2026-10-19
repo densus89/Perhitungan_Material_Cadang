@@ -11,6 +11,10 @@ select ok(coalesce((select not has_column_privilege('service_role',c.oid,a.attnu
 select ok(coalesce((select p.prosecdef and p.proconfig @> array['search_path=""'] and has_function_privilege('service_role',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('anon',p.oid,'EXECUTE') from pg_proc p where p.oid=to_regprocedure(signature)),false),'Hardened service-only resumable RPC: '||signature)
 from(values ('public.claim_asset_import_processing(uuid,uuid,uuid,jsonb,uuid)'),('public.commit_asset_import_chunk(uuid,uuid,uuid,integer,integer,jsonb,jsonb,text,text)'),('public.release_asset_import_processing(uuid,uuid,uuid)'),('public.finalize_asset_import_run(uuid,uuid,uuid)'),('public.fail_asset_import_run(uuid,uuid,uuid)')) f(signature);
 select ok(coalesce((select not has_function_privilege('service_role',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE') from pg_proc p where p.oid=to_regprocedure('private.insert_asset_packed_pairs(uuid,uuid,jsonb,jsonb)')),false),'Private decoder cannot bypass lease through direct service invocation');
+select ok(not has_table_privilege('service_role','public.asset_snapshot_rows','UPDATE,DELETE'),'Service cannot directly rewrite or delete snapshot evidence');
+select ok(not has_table_privilege('service_role','public.asset_valuations','UPDATE,DELETE'),'Service has no broad valuation update or delete grant');
+select ok(not has_column_privilege('service_role','public.asset_valuations','nilai_abc','UPDATE'),'Service cannot directly change valuation calculations');
+select ok(has_column_privilege('service_role','public.asset_valuations',c,'UPDATE'),'Service retains guarded review column: '||c) from unnest(array['approved_by','approved_at','approval_notes'])c;
 
 insert into auth.users(id,email) values
  ('50000000-0000-4000-8000-000000000001','asset.operator.a@pln.co.id'),

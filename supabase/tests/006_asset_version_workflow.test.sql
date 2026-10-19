@@ -62,7 +62,7 @@ select is((select current_run_id from public.import_sessions where id='65000000-
 update public.asset_import_runs r set expected_rows_hash=h.rows_hash,expected_valuations_hash=h.valuations_hash from private.asset_run_hashes('67000000-0000-4000-8000-000000000002') h where r.id='67000000-0000-4000-8000-000000000002';
 update public.asset_import_runs set expected_row_count=2,expected_valuation_count=2 where id='67000000-0000-4000-8000-000000000002';
 set local role service_role;
-select throws_ok($$update public.asset_import_runs set status='COMPLETE',completed_at=now(),finalized_rows_hash=expected_rows_hash,finalized_valuations_hash=expected_valuations_hash where id='67000000-0000-4000-8000-000000000002'$$,'22023',null,'Direct service transition cannot mark a partial run complete');
+select throws_ok($$update public.asset_import_runs set status='COMPLETE',completed_at=now(),finalized_rows_hash=expected_rows_hash,finalized_valuations_hash=expected_valuations_hash where id='67000000-0000-4000-8000-000000000002'$$,'42501',null,'Direct service transition has no UPDATE privilege');
 select throws_ok($$select public.finalize_asset_import_run('60000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000002')$$,'22023',null,'Partial batches cannot finalize');
 reset role;
 update public.asset_import_runs set expected_row_count=1,expected_valuation_count=1 where id='67000000-0000-4000-8000-000000000002';
@@ -70,7 +70,7 @@ set local role service_role;
 select lives_ok($$select public.finalize_asset_import_run('60000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000002')$$,'Complete matching run finalizes');
 select is((select current_run_id from public.import_sessions where id='65000000-0000-4000-8000-000000000001'),'67000000-0000-4000-8000-000000000002'::uuid,'Only successful retry is current');
 select throws_ok($$select pg_temp.submit_current('60000000-0000-4000-8000-000000000001','63000000-0000-4000-8000-000000000002')$$,'22023',null,'Blocking row issues prevent submission');
-select throws_ok($$update public.asset_snapshot_rows set no_aset='tampered' where id='68000000-0000-4000-8000-000000000002'$$,'22023',null,'Finalized batch rows are frozen');
+select throws_ok($$update public.asset_snapshot_rows set no_aset='tampered' where id='68000000-0000-4000-8000-000000000002'$$,'42501',null,'Service cannot rewrite finalized snapshot evidence');
 reset role;
 
 -- A clean retry replaces the errored finalized snapshot; old batches remain frozen.

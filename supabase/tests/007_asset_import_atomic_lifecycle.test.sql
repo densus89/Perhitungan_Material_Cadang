@@ -141,6 +141,15 @@ create function pg_temp.token(k text default 'current') returns uuid language sq
 create function pg_temp.chunk(i integer,t uuid default null) returns integer language sql as $$
  select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),coalesce(t,pg_temp.token()),i,i*2000,pg_temp.rows(i*2000,least(2000,2001-i*2000)),pg_temp.vals(i*2000,least(2000,2001-i*2000)),repeat('c',64),repeat('d',64))
 $$;
+-- Invoker security intentionally preserves the caller's service_role below.
+create function pg_temp.assert_no_direct_pair_mutation(phase text) returns setof text language plpgsql as $$
+begin
+ return next extensions.throws_ok($sql$update public.asset_snapshot_rows set no_aset='MUTATED' where id=pg_temp.uid(11,2000)$sql$,'42501',null,phase||': direct snapshot update denied');
+ return next extensions.throws_ok($sql$delete from public.asset_snapshot_rows where id=pg_temp.uid(11,2000)$sql$,'42501',null,phase||': direct snapshot delete denied');
+ return next extensions.throws_ok($sql$update public.asset_valuations set nilai_abc=1 where asset_row_id=pg_temp.uid(11,2000)$sql$,'42501',null,phase||': direct calculation update denied');
+ return next extensions.throws_ok($sql$delete from public.asset_valuations where asset_row_id=pg_temp.uid(11,2000)$sql$,'42501',null,phase||': direct valuation delete denied');
+ return next extensions.throws_ok($sql$update public.asset_valuations set approval_notes='PREMATURE' where asset_row_id=pg_temp.uid(11,2000)$sql$,'42501',null,phase||': review-column grant cannot mutate processing evidence');
+end$$;
 select lives_ok($$select pg_temp.replace_mapping(3)$$,'Resumable mapping fixture');
 select lives_ok($$insert into lease_evidence select 'current',(pg_temp.claim()->>'processing_lease_token')::uuid$$,'Claim creates new resumable run');
 select is((select processing_protocol_version from public.asset_import_runs where id=pg_temp.uid(8,5)),'resumable-v1','New claim uses explicit protocol');
@@ -184,6 +193,18 @@ select is((select count(*) from public.asset_import_chunks where import_run_id=p
 select is(pg_temp.chunk(1),1,'Tail chunk commits paired data and marker');
 select is((select row_count from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5) and chunk_index=1),1,'Tail marker persisted');
 select is((select count(*) from public.asset_valuations where import_run_id=pg_temp.uid(8,5)),1::bigint,'Tail valuation committed atomically');
+set local role service_role;
+select * from pg_temp.assert_no_direct_pair_mutation('Active lease');
+reset role;
+update public.asset_import_runs set processing_lease_expires_at=clock_timestamp()-interval '1 second' where id=pg_temp.uid(8,5);
+update lease_evidence set token=(pg_temp.claim()->>'processing_lease_token')::uuid where name='current';
+set local role service_role;
+select * from pg_temp.assert_no_direct_pair_mutation('After reclaim');
+reset role;
+select is((select no_aset from public.asset_snapshot_rows where id=pg_temp.uid(11,2000)),'SYNTHETIC-2000','Denied direct writes preserve committed snapshot');
+select is((select nilai_abc from public.asset_valuations where asset_row_id=pg_temp.uid(11,2000)),0::numeric,'Denied direct writes preserve committed valuation');
+select is((select approval_notes from public.asset_valuations where asset_row_id=pg_temp.uid(11,2000)),null::text,'Processing approval evidence remains empty');
+select is((select count(*) from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5)),1::bigint,'Denied direct writes preserve durable marker');
 select is(pg_temp.chunk(1),1,'Response-lost retry is idempotent');
 select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,'[[]]',pg_temp.vals(2000,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Replay still validates packed row shape');
 select throws_ok($$select public.commit_asset_import_chunk(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),1,2000,pg_temp.rows(2000,1),pg_temp.vals(1999,1),repeat('c',64),repeat('d',64))$$,'22023',null,'Replay still validates row/valuation pairing');
@@ -206,6 +227,16 @@ select is((select status::text from public.asset_import_runs where id=pg_temp.ui
 select is((select summary->>'rowCount' from public.asset_import_run_metadata where import_run_id=pg_temp.uid(8,5)),'2001','Final summary derives from complete persisted data');
 select is((select count(*) from public.audit_events where action='ASSET_IMPORT_FINALIZED' and details->>'import_run_id'=pg_temp.uid(8,5)::text),1::bigint,'Finalization audited once');
 select lives_ok($$select public.release_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'Owner can release after finalization');
+-- Set up the review state as the transaction owner; exercise the same direct
+-- service approval path as the existing full review workflow test in 006.
+update public.dataset_versions set status='PENDING_RST' where id=pg_temp.uid(4,3);
+set local role service_role;
+select lives_ok($$update public.asset_valuations set approved_by=pg_temp.uid(1,2),approved_at=now(),approval_notes='Reviewed synthetic resumable evidence' where asset_row_id=pg_temp.uid(11,2000)$$,'RST can append COMPLETE resumable approval through narrowed grants');
+select throws_ok($$update public.asset_valuations set approval_notes='REWRITE' where asset_row_id=pg_temp.uid(11,2000)$$,'22023',null,'COMPLETE resumable approval remains append-only');
+reset role;
+select is((select approved_by from public.asset_valuations where asset_row_id=pg_temp.uid(11,2000)),pg_temp.uid(1,2),'Authorized reviewer identity persisted');
+select is((select count(*) from public.audit_events where action='ASSET_VALUATION_APPROVED' and details->>'asset_row_id'=pg_temp.uid(11,2000)::text),1::bigint,'Resumable review approval audited once');
+select is((select finalized_valuations_hash from public.asset_import_runs where id=pg_temp.uid(8,5)),(select valuations_hash from private.asset_run_hashes(pg_temp.uid(8,5))),'Review approval preserves frozen calculation hash');
 select set_config('request.jwt.claim.sub',pg_temp.uid(1,3)::text,true);
 set local role authenticated;
 select is((select count(*) from public.asset_import_chunks where import_run_id=pg_temp.uid(8,5)),0::bigint,'Unassigned operator cannot read manifest');
