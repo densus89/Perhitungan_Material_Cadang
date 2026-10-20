@@ -8,6 +8,34 @@ vi.mock("../../src/lib/supabase/browser", () => ({ createBrowserSupabaseClient: 
 beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker); vi.stubGlobal("fetch", network.fetch); network.fetch.mockReset(); network.upload.mockReset().mockResolvedValue({ error: null }); });
 function selectFile(file = new File(["synthetic"], "snapshot.xlsx")) { fireEvent.change(screen.getByLabelText("Berkas snapshot XLSX"), { target: { files: [file] } }); }
 describe("persistent asset import", () => {
+  it("continues processing sequentially until the authoritative final response", async () => {
+    const processing = (completedRows: number, completedChunks: number) => ({ ...base, stage: "PROCESSING", progress: { completedRows, expectedRows: 50_000, completedChunks, expectedChunks: 25, percent: Math.floor(completedRows / 500) } });
+    const summary = { rowCount: 50_000, blockingErrors: 0, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: {}, totalNilaiABC: 0 };
+    network.fetch.mockResolvedValueOnce(Response.json({ ...base, stage: "READY_TO_PROCESS", layout: mapping }))
+      .mockResolvedValueOnce(Response.json(processing(24_000, 12), { status: 202 }))
+      .mockResolvedValueOnce(Response.json(processing(48_000, 24), { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ...base, stage: "READY_TO_SUBMIT", summary }));
+    const { result } = renderHook(() => useAssetImport([], units));
+    await act(async () => result.current.resume({ ...base, unitId: units[0].id, fileName: "stored.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "READY_TO_PROCESS", rowCount: 50_000 }));
+    await act(async () => result.current.retry());
+    expect(network.fetch.mock.calls.filter(([url, options]) => url.endsWith("/process/") && options.method === "POST")).toHaveLength(3);
+    expect(result.current.response).toMatchObject({ stage: "READY_TO_SUBMIT", summary: { rowCount: 50_000 } });
+    expect(result.current.busy).toBe(false);
+  });
+  it("shows persisted row progress and offers one keyboard-accessible manual continuation", async () => {
+    const progress = { completedRows: 2_000, expectedRows: 6_000, completedChunks: 1, expectedChunks: 3, percent: 33 };
+    let finish!: (response: Response) => void;
+    network.fetch.mockResolvedValueOnce(Response.json({ ...base, stage: "PROCESSING", progress })).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    render(<ImportWorkspace actorUnits={units} initialDrafts={[{ ...base, unitId: units[0].id, fileName: "processing.xlsx", createdAt: "2026-10-16T00:00:00Z", stage: "PROCESSING", rowCount: 6_000, progress }]} />);
+    expect(screen.getByText(/2\.000 dari 6\.000 baris/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Lanjutkan processing.xlsx" }));
+    const action = await screen.findByRole("button", { name: "Lanjutkan proses" });
+    expect(screen.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "2000");
+    fireEvent.click(action); expect(action).toBeDisabled();
+    await act(async () => finish(Response.json({ ...base, stage: "READY_TO_SUBMIT", summary: { rowCount: 6_000, blockingErrors: 0, warningCount: 0, conditions: {}, valueSources: {}, issueCounts: {}, totalNilaiABC: 0 } })));
+    await screen.findByText("Status server: READY_TO_SUBMIT");
+    expect(network.fetch.mock.calls.filter(([url]) => url.endsWith("/process/"))).toHaveLength(1);
+  });
   it("clears previous local mapping when resume cancels a preview and refreshes in the same render", async () => {
     network.fetch.mockResolvedValue(Response.json({ ...base, stage: "MAPPING", layout: { ...mapping, sheetName: "NEW_DRAFT" } }));
     const { result } = renderHook(() => useAssetImport([], units));

@@ -23,6 +23,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   const previewGeneration = useRef(0);
   const authorityGeneration = useRef(0);
   const inFlight = useRef(false);
+  const mounted = useRef(true);
   const [unitId, setUnitId] = useState(actorUnits[0]?.id ?? "");
   const [drafts, setDrafts] = useState(initialDrafts.filter(draft => actorUnits.some(unit => unit.id === draft.unitId)));
   const [response, setResponse] = useState<ImportResponse | null>(null);
@@ -42,6 +43,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   const previewReady = Boolean(snapshot?.mapping && snapshot.file === file && snapshot.mapping === mapping);
   const confirmed = previewReady && confirmedSnapshot === snapshot;
   useEffect(() => () => {
+    mounted.current = false;
     previewGeneration.current++; authorityGeneration.current++;
     worker.current?.terminate(); worker.current = null;
   }, []);
@@ -64,7 +66,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     setResponse(next);
     setDrafts(previous => {
       const old = previous.find(draft => draft.importId === next.importId);
-      const draft: ImportDraft = { importId: next.importId, datasetId: next.datasetId, versionId: next.versionId, unitId: next.source?.unitId ?? old?.unitId ?? selectedUnit, fileName: next.source?.fileName ?? old?.fileName ?? selectedFile?.name ?? "Snapshot XLSX", createdAt: old?.createdAt ?? new Date().toISOString(), stage: next.stage, rowCount: next.summary?.rowCount ?? old?.rowCount ?? null };
+      const draft: ImportDraft = { importId: next.importId, datasetId: next.datasetId, versionId: next.versionId, unitId: next.source?.unitId ?? old?.unitId ?? selectedUnit, fileName: next.source?.fileName ?? old?.fileName ?? selectedFile?.name ?? "Snapshot XLSX", createdAt: old?.createdAt ?? new Date().toISOString(), stage: next.stage, rowCount: next.summary?.rowCount ?? next.progress?.expectedRows ?? old?.rowCount ?? null, ...(next.stage === "PROCESSING" && (next.progress ?? old?.progress) ? { progress: next.progress ?? old?.progress } : {}) };
       return [draft, ...previous.filter(item => item.importId !== next.importId)];
     });
   }
@@ -110,6 +112,21 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     catch { /* A deliberate refresh remains available; never restart a mutation. */ }
     setError("Respons terputus atau permintaan gagal. Status tersimpan diperiksa; gunakan Periksa status sebelum mencoba tindakan lagi.");
   }
+  async function continueProcessing(importId: string, initial?: ImportResponse) {
+    const generation = authorityGeneration.current;
+    let current = initial, attempts = 0, attemptLimit = initial?.progress ? Math.ceil(initial.progress.expectedChunks / 12) + 2 : 2;
+    while (!current || current.stage === "PROCESSING") {
+      if (!mounted.current || authorityGeneration.current !== generation || attempts >= attemptLimit) break;
+      current = await api.process(importId); attempts++;
+      if (!mounted.current || authorityGeneration.current !== generation) break;
+      remember(current); setStep(stepFor(current));
+      if (current.progress) attemptLimit = Math.ceil(current.progress.expectedChunks / 12) + 2;
+    }
+    if (!mounted.current || authorityGeneration.current !== generation) return current;
+    if (current?.stage === "PROCESSING" && attempts >= attemptLimit) setMessage("Proses tersimpan belum selesai. Gunakan Lanjutkan proses untuk melanjutkan batch berikutnya.");
+    else if (current && current.stage !== "PROCESSING") setMessage("Validasi server selesai.");
+    return current;
+  }
   async function run() {
     const ready = snapshot;
     if (inFlight.current || worker.current || reading || !previewReady || !ready?.mapping || !confirmed || confirmedSnapshot?.generation !== ready.generation || !actorUnits.some(unit => unit.id === unitId)) return;
@@ -119,7 +136,7 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
       if (!current) { current = await api.create(unitId, ready.file, ready.preview.sha256); remember(current); }
       if (current.stage === "UPLOAD") { if (!current.upload) throw new Error("Missing signature"); await api.upload(ready.file, current.upload); current = await api.complete(current.importId); remember(current); }
       current = await api.saveMapping(current.importId, ready.mapping, { ruleVersion: ready.preview.ruleVersion, layoutHash: ready.preview.layoutHash, canonicalHash: ready.preview.canonicalHash }); remember(current);
-      current = await api.process(current.importId); remember(current); setStep(stepFor(current)); setMessage("Validasi server selesai.");
+      await continueProcessing(current.importId);
     } catch { if (current) await recover(current.importId); else setError("Draft belum dapat dipastikan. Muat ulang halaman dan periksa daftar draft sebelum membuat impor baru."); }
     finally { inFlight.current = false; setBusy(false); }
   }
@@ -136,9 +153,9 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     await refresh(draft.importId, "ALL", 0, {}, false);
   }
   async function retry() {
-    if (!response || inFlight.current || !["READY_TO_PROCESS", "FAILED", "NEEDS_FIX"].includes(response.stage)) return;
+    if (!response || inFlight.current || !["READY_TO_PROCESS", "PROCESSING", "FAILED", "NEEDS_FIX"].includes(response.stage)) return;
     beginAuthoritativeTransition(); inFlight.current = true; setBusy(true); setAcknowledged(false); setError("");
-    try { const current = await api.process(response.importId); remember(current); setStep(stepFor(current)); }
+    try { await continueProcessing(response.importId, response.stage === "PROCESSING" ? response : undefined); }
     catch { await recover(response.importId); }
     finally { inFlight.current = false; setBusy(false); }
   }
@@ -157,5 +174,5 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
     finally { inFlight.current = false; setBusy(false); }
   }
   function startNew() { if (inFlight.current) return; beginAuthoritativeTransition(); setResponse(null); setFile(null); setSnapshot(null); setMapping(null); setConfirmed(false); setError(""); setMessage(""); setStep("source"); setAcknowledged(false); setFilter("ALL"); setReviewOptions({}); }
-  return { unitId, setUnitId, drafts, response, file, preview, previewReady, mapping, confirmed, setConfirmed, busy, reading, error, message, step, setStep, filter, reviewOptions, acknowledged, setAcknowledged, selectFile, changeMapping, run, refresh, resume, retry, verifyUpload, submit, startNew };
+  return { unitId, setUnitId, drafts, response, file, preview, previewReady, mapping, confirmed, setConfirmed, busy, reading, error, message, step, setStep, filter, reviewOptions, acknowledged, setAcknowledged, selectFile, changeMapping, run, refresh, resume, retry, continueProcessing: retry, verifyUpload, submit, startNew };
 }

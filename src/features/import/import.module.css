@@ -26,4 +26,8 @@
 .drafts li { display: flex; gap: 16px; justify-content: space-between; align-items: center; border-top: 1px solid var(--border, #dce6e8); padding-top: 14px; }
 .drafts p { margin: 5px 0; overflow-wrap: anywhere; }
 .status { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+.statusActions { display: flex; flex-wrap: wrap; gap: 10px; }
+.progress { display: grid; gap: 6px; margin-top: 12px; min-width: min(360px, 72vw); }
+.progress progress { width: 100%; accent-color: #007f8b; }
+.progress p { margin: 0; color: var(--text-muted, #516972); font-size: 13px; }
 @media (max-width: 760px) { .sourceGrid, .mappingGrid { grid-template-columns: minmax(0, 1fr); } .drafts li { align-items: flex-start; flex-direction: column; } .fileBox { padding: 18px; } .metrics strong { font-size: 18px; } }
