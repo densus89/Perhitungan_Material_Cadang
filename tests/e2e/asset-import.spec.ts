@@ -1,5 +1,18 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect as baseExpect, test } from "@playwright/test";
-import { createAssetScenario, cleanupAssetScenario, loginAssetActor, uploadAssetWorkbook, type AssetScenario } from "./support/asset-scenario";
+import type { ImportResponse } from "../../src/domain/asset-import/schemas";
+import {
+  continueAssetProcessing,
+  createAssetScenario,
+  cleanupAssetScenario,
+  loginAssetActor,
+  startAssetWorkbookPath,
+  uploadAssetWorkbook,
+  writeSyntheticAssetWorkbook,
+  type AssetScenario,
+} from "./support/asset-scenario";
 const expect = baseExpect.configure({ timeout: 30000 });
 
 async function logFailureState(scenario: AssetScenario) {
@@ -79,5 +92,53 @@ test.describe.serial("private, versioned synthetic asset import", () => {
       expect(Math.max(...scenario.processDurationsMs)).toBeLessThan(300000);
       console.log(JSON.stringify({ scenario: "asset-import", runId: scenario.runId, processDurationsMs: scenario.processDurationsMs, privateSource: "denied unsigned/foreign session; signed access verified", history: "verified", cleanup: "afterAll exact isolated resources" }));
     } finally { await reviewContext.close(); await otherContext.close(); }
+  });
+
+  test("recovers persisted progress after a process response is lost and resumes manually", async ({ page }) => {
+    test.setTimeout(600000);
+    const rowCount = 24_001;
+    const directory = await mkdtemp(join(tmpdir(), "asset-e2e-recovery-"));
+    const path = join(directory, scenario.fileName("lost-response"));
+    let lostResponse: ImportResponse | undefined;
+    try {
+      await writeSyntheticAssetWorkbook(path, scenario, rowCount);
+      await loginAssetActor(page, scenario, "operator");
+      await page.goto("/impor/");
+      await page.route(/\/api\/imports\/[^/]+\/process\/$/, async route => {
+        const started = Date.now();
+        const response = await route.fetch();
+        lostResponse = await response.json() as ImportResponse;
+        scenario.processResponses.push({ status: response.status(), durationMs: Date.now() - started, body: lostResponse });
+        await route.abort("connectionfailed");
+      }, { times: 1 });
+
+      await startAssetWorkbookPath(page, path, { previewTimeoutMs: 300000 });
+      await expect.poll(() => Boolean(lostResponse), { timeout: 300000 }).toBe(true);
+      await expect(page.getByText(/Respons terputus.*Status tersimpan diperiksa/)).toBeVisible();
+      expect(lostResponse).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 24_000, expectedRows: rowCount } });
+      expect(scenario.processResponses.at(-1)?.durationMs).toBeLessThan(240000);
+      await expect(page.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "24000");
+
+      await page.reload();
+      await page.getByRole("button", { name: `Lanjutkan ${scenario.fileName("lost-response")}` }).click();
+      await expect(page.getByRole("button", { name: "Lanjutkan proses" })).toBeVisible();
+      const result = await continueAssetProcessing(page, scenario, { processTimeoutMs: 300000 });
+      expect(result.stage).toBe("READY_TO_SUBMIT");
+      expect(result.summary?.rowCount).toBe(rowCount);
+
+      const run = await scenario.client.from("asset_import_runs").select("id,status").eq("import_session_id", result.importId).eq("status", "COMPLETE").single();
+      expect(run.error).toBeNull();
+      const [rows, valuations, chunks] = await Promise.all([
+        scenario.client.from("asset_snapshot_rows").select("id", { count: "exact", head: true }).eq("import_run_id", run.data!.id),
+        scenario.client.from("asset_valuations").select("asset_row_id", { count: "exact", head: true }).eq("import_run_id", run.data!.id),
+        scenario.client.from("asset_import_chunks").select("chunk_index,row_count").eq("import_run_id", run.data!.id),
+      ]);
+      expect(rows.count).toBe(rowCount);
+      expect(valuations.count).toBe(rowCount);
+      expect(chunks.data).toHaveLength(13);
+      expect(chunks.data?.reduce((total, chunk) => total + chunk.row_count, 0)).toBe(rowCount);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
