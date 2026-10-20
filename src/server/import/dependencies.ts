@@ -1,10 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../lib/supabase/database.types";
+import type { Database } from "../../lib/supabase/database";
 import { MAX_WORKBOOK_BYTES, importReviewQuerySchema, type ImportReviewQuery } from "../../domain/asset-import/schemas";
 import type { AssetSheetMapping } from "../../domain/asset-import/types";
-import type { Json } from "../../lib/supabase/database.types";
+import type { Json } from "../../lib/supabase/database";
 
 export type ImportTable = keyof Database["public"]["Tables"];
 export type Row<T extends ImportTable> = Database["public"]["Tables"][T]["Row"];

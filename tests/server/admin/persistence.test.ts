@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createUserAdminDependencies } from "../../../src/server/admin/user-service";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../../src/lib/supabase/database.types";
+import type { Database } from "../../../src/lib/supabase/database";
 vi.mock("server-only", () => ({}));
 const actorId = "40000000-0000-4000-8000-000000000001";
 const input = { userId: "40000000-0000-4000-8000-000000000002", role: "UNIT_OPERATOR" as const, unitIndukIds: ["41000000-0000-4000-8000-000000000001"], status: "ACTIVE" as const };

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import type { Database } from "../../../src/lib/supabase/database.types";
+import type { Database } from "../../../src/lib/supabase/database";
 import { ActorAccessError, loadActor, requireActor } from "../../../src/server/auth/actor";
 
 vi.mock("server-only", () => ({}));

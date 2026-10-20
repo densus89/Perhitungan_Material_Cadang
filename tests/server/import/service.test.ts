@@ -7,7 +7,7 @@ import { fixture } from "./lifecycle-fixture";
 import { assetRow, headers } from "../../fixtures/asset-workbooks";
 import { createImportDependencies } from "../../../src/server/import/dependencies";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../../src/lib/supabase/database.types";
+import type { Database } from "../../../src/lib/supabase/database";
 vi.mock("server-only", () => ({}));
 describe("private import lifecycle", () => {
   it("allocates ASSET draft and an exact scoped non-upsert upload", async () => {

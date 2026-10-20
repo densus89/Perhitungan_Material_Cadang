@@ -6,7 +6,7 @@ import { createImportSchema, importIdSchema, saveMappingSchema, sheetMappingSche
 import { normalizeHeader } from "../../domain/asset-import/normalize-header";
 import { readNodeAssetWorkbook as readAssetWorkbook } from "./read-node-workbook";
 import type { AssetSheetMapping } from "../../domain/asset-import/types";
-import type { Json } from "../../lib/supabase/database.types";
+import type { Json } from "../../lib/supabase/database";
 import type { ImportDependencies, Row } from "./dependencies";
 import { loadImportReview, loadImportComparison } from "./workspace";
 import type { ImportReviewQuery } from "../../domain/asset-import/schemas";

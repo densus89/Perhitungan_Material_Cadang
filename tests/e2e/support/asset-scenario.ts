@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect as baseExpect, type Page } from "@playwright/test";
-import type { Database } from "../../../src/lib/supabase/database.types";
+import type { Database } from "../../../src/lib/supabase/database";
 import type { ImportResponse } from "../../../src/domain/asset-import/schemas";
 import { parseE2eEnvironment } from "./environment";
 import { createE2EAdminClient, requireE2eData, requireE2eSuccess } from "./users";

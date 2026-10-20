@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardCheck } from "lucide-react";
 import type { Actor } from "../../domain/access";
 import type { ImportReviewQuery } from "../../domain/asset-import/schemas";
-import type { Json } from "../../lib/supabase/database.types";
+import type { Json } from "../../lib/supabase/database";
 import type { ComparisonQuery, MappingPage, ReviewComparisonPage, ReviewDetail, ReviewFilters, ReviewQueue, ReviewResult } from "./review-contracts";
 import { ComparisonDiffTable, VersionDiffTable } from "./VersionDiffTable";
 import styles from "./review.module.css";

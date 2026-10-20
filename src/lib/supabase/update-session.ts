@@ -2,7 +2,7 @@ import "server-only";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getPublicEnv } from "../../config/env";
-import type { Database } from "./database.types";
+import type { Database } from "./database";
 
 /** Refresh and route convenience only. Every server operation must reauthorize. */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {

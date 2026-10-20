@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { isAllowedPlnEmail, normalizePlnEmail, type Actor, type AppRole } from "../../domain/access";
-import type { Database } from "../../lib/supabase/database.types";
+import type { Database } from "../../lib/supabase/database";
 
 export type { Actor } from "../../domain/access";
 type ActorClient = Pick<SupabaseClient<Database>, "auth" | "from">;

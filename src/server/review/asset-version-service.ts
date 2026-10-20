@@ -2,7 +2,7 @@ import "server-only";
 import { isDeepStrictEqual } from "node:util";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Actor } from "../../domain/access";
-import type { Database, Json } from "../../lib/supabase/database.types";
+import type { Database, Json } from "../../lib/supabase/database";
 import { importReviewQuerySchema, type ImportReviewQuery } from "../../domain/asset-import/schemas";
 import { comparisonQuerySchema, expectedReviewSchema, mappingQuerySchema, reviewActionSchema, reviewFiltersSchema, type ComparisonQuery, type MappingPage, type ReviewAction, type ReviewComparisonPage, type ReviewDetail, type ReviewFilters, type ReviewQueue, type ReviewResult, type ReviewRow, type ReviewState } from "../../features/import/review-contracts";
 export class ReviewError extends Error { constructor(public code: string, public status: number) { super(code); } }

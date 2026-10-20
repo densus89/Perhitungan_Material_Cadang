@@ -49,8 +49,8 @@ select extensions.has_index('public'::name,'asset_snapshot_rows'::name,'asset_ro
 select extensions.has_trigger('public'::name,'asset_snapshot_rows'::name,'guard_asset_rows_insert'::name,'Snapshot inserts use a statement-level batch guard');
 select extensions.has_trigger('public'::name,'asset_valuations'::name,'guard_asset_valuations_insert'::name,'Valuation inserts use a statement-level batch guard');
 select extensions.ok(strpos(pg_get_functiondef('private.guard_asset_insert_statement()'::regprocedure),'pg_advisory_xact_lock_shared')>0,'Insert batches share a run-scoped lifecycle lock');
-select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('public.finalize_asset_import_run(uuid,uuid,uuid'))),'pg_advisory_xact_lock(')>0,'Finalization takes the exclusive run-scoped lifecycle lock');
-select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('public.fail_asset_import_run(uuid,uuid,uuid'))),'pg_advisory_xact_lock(')>0,'Failure takes the exclusive run-scoped lifecycle lock');
+select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('public.finalize_asset_import_run(uuid,uuid,uuid)')),'pg_advisory_xact_lock(')>0,'Finalization takes the exclusive run-scoped lifecycle lock');
+select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('public.fail_asset_import_run(uuid,uuid,uuid)')),'pg_advisory_xact_lock(')>0,'Failure takes the exclusive run-scoped lifecycle lock');
 select extensions.has_function('public'::name,'insert_asset_import_batch'::name,array['uuid','uuid','jsonb','jsonb']::name[],'Packed asset batch RPC exists');
 select extensions.ok(strpos(regexp_replace(pg_get_functiondef('public.insert_asset_import_batch(uuid,uuid,jsonb,jsonb)'::regprocedure),'[[:space:]]','','g'),'row_count>2000')>0,'Packed asset RPC enforces the 2000-row limit');
 select extensions.ok(strpos(pg_get_functiondef(to_regprocedure('private.insert_asset_packed_pairs(uuid,uuid,jsonb,jsonb)')),'jsonb_array_elements(p_rows)')>0,'Packed asset RPC decoder uses a linear set-based pass');

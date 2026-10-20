@@ -1,5 +1,3 @@
-// Generated from the linked public schema. Four GI GENERATED ALWAYS Insert/Update
-// keys are narrowed to never to match PostgreSQL; readable Row fields are unchanged.
 export type Json =
   | string
   | number
@@ -109,6 +107,57 @@ export type Database = {
           },
         ]
       }
+      asset_import_chunks: {
+        Row: {
+          chunk_index: number
+          completed_at: string
+          completed_by: string
+          import_run_id: string
+          row_count: number
+          rows_hash: string
+          start_ordinal: number
+          unit_induk_id: string
+          valuations_hash: string
+        }
+        Insert: {
+          chunk_index: number
+          completed_at?: string
+          completed_by: string
+          import_run_id: string
+          row_count: number
+          rows_hash: string
+          start_ordinal: number
+          unit_induk_id: string
+          valuations_hash: string
+        }
+        Update: {
+          chunk_index?: number
+          completed_at?: string
+          completed_by?: string
+          import_run_id?: string
+          row_count?: number
+          rows_hash?: string
+          start_ordinal?: number
+          unit_induk_id?: string
+          valuations_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_import_chunks_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_import_chunks_import_run_id_unit_induk_id_fkey"
+            columns: ["import_run_id", "unit_induk_id"]
+            isOneToOne: false
+            referencedRelation: "asset_import_runs"
+            referencedColumns: ["id", "unit_induk_id"]
+          },
+        ]
+      }
       asset_import_run_metadata: {
         Row: {
           comparison_base_version_id: string | null
@@ -208,8 +257,13 @@ export type Database = {
           finalized_valuations_hash: string | null
           id: string
           import_session_id: string
+          last_progress_at: string | null
           mapping_hash: string
           mapping_revision: string | null
+          processing_attempts: number
+          processing_lease_expires_at: string | null
+          processing_lease_token: string | null
+          processing_protocol_version: string
           rule_version: string
           source_hash: string
           status: Database["public"]["Enums"]["asset_import_run_status"]
@@ -229,8 +283,13 @@ export type Database = {
           finalized_valuations_hash?: string | null
           id?: string
           import_session_id: string
+          last_progress_at?: string | null
           mapping_hash: string
           mapping_revision?: string | null
+          processing_attempts?: number
+          processing_lease_expires_at?: string | null
+          processing_lease_token?: string | null
+          processing_protocol_version?: string
           rule_version: string
           source_hash: string
           status?: Database["public"]["Enums"]["asset_import_run_status"]
@@ -250,8 +309,13 @@ export type Database = {
           finalized_valuations_hash?: string | null
           id?: string
           import_session_id?: string
+          last_progress_at?: string | null
           mapping_hash?: string
           mapping_revision?: string | null
+          processing_attempts?: number
+          processing_lease_expires_at?: string | null
+          processing_lease_token?: string | null
+          processing_protocol_version?: string
           rule_version?: string
           source_hash?: string
           status?: Database["public"]["Enums"]["asset_import_run_status"]
@@ -721,7 +785,7 @@ export type Database = {
           latitude: number
           longitude: number
           nama_gi: string
-          nama_gi_key?: never
+          nama_gi_key?: string | null
           source_hash: string
           source_version: string
           unit_induk_id: string
@@ -729,7 +793,7 @@ export type Database = {
           updated_at?: string
           updated_by: string
           upt: string
-          upt_key?: never
+          upt_key?: string | null
         }
         Update: {
           created_at?: string
@@ -737,7 +801,7 @@ export type Database = {
           latitude?: number
           longitude?: number
           nama_gi?: string
-          nama_gi_key?: never
+          nama_gi_key?: string | null
           source_hash?: string
           source_version?: string
           unit_induk_id?: string
@@ -745,7 +809,7 @@ export type Database = {
           updated_at?: string
           updated_by?: string
           upt?: string
-          upt_key?: never
+          upt_key?: string | null
         }
         Relationships: [
           {
@@ -1332,6 +1396,30 @@ export type Database = {
         }
         Returns: string
       }
+      claim_asset_import_processing: {
+        Args: {
+          p_actor_id: string
+          p_expected_revision: string
+          p_import_id: string
+          p_lease_token?: string
+          p_run: Json
+        }
+        Returns: Json
+      }
+      commit_asset_import_chunk: {
+        Args: {
+          p_actor_id: string
+          p_chunk_index: number
+          p_lease_token: string
+          p_rows: Json
+          p_rows_hash: string
+          p_run_id: string
+          p_start_ordinal: number
+          p_valuations: Json
+          p_valuations_hash: string
+        }
+        Returns: number
+      }
       complete_asset_import_comparison: {
         Args: {
           p_actor_id: string
@@ -1341,14 +1429,26 @@ export type Database = {
         }
         Returns: string
       }
-      fail_asset_import_run: {
-        Args: { p_actor_id: string; p_run_id: string }
-        Returns: string
-      }
-      finalize_asset_import_run: {
-        Args: { p_actor_id: string; p_run_id: string }
-        Returns: string
-      }
+      fail_asset_import_run:
+        | { Args: { p_actor_id: string; p_run_id: string }; Returns: string }
+        | {
+            Args: {
+              p_actor_id: string
+              p_lease_token: string
+              p_run_id: string
+            }
+            Returns: string
+          }
+      finalize_asset_import_run:
+        | { Args: { p_actor_id: string; p_run_id: string }; Returns: string }
+        | {
+            Args: {
+              p_actor_id: string
+              p_lease_token: string
+              p_run_id: string
+            }
+            Returns: string
+          }
       get_asset_version_review_state: {
         Args: { p_version_id: string }
         Returns: Json
@@ -1356,13 +1456,17 @@ export type Database = {
       insert_asset_import_batch: {
         Args: {
           p_actor_id: string
-          p_run_id: string
           p_rows: Json
+          p_run_id: string
           p_valuations: Json
         }
         Returns: number
       }
       list_asset_version_reviews: { Args: { p_filters: Json }; Returns: Json }
+      release_asset_import_processing: {
+        Args: { p_actor_id: string; p_lease_token: string; p_run_id: string }
+        Returns: string
+      }
       replace_asset_import_mapping: {
         Args: {
           p_actor_id: string

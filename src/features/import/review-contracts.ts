@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { importReviewQuerySchema } from "../../domain/asset-import/schemas";
-import type { Json, Database } from "../../lib/supabase/database.types";
+import type { Json, Database } from "../../lib/supabase/database";
 export const reviewFiltersSchema = importReviewQuerySchema.extend({ offset: z.coerce.number().int().min(0).max(10000000).default(0), filter: importReviewQuerySchema.shape.filter.default("ALL"), unitId: z.uuid().optional(), status: z.enum(["DRAFT", "PENDING_RST", "ACTIVE", "HISTORICAL", "NEEDS_FIX", "TRASH", "ALL"]).default("PENDING_RST") }).strict();
 export type ReviewFilters = z.infer<typeof reviewFiltersSchema>;
 export const expectedReviewSchema = z.union([z.object({ runId: z.uuid(), mappingRevision: z.uuid(), layoutHash: z.string().regex(/^[0-9a-f]{64}$/), baseVersionId: z.uuid().nullable(), comparisonId: z.uuid().nullable() }).strict(), z.object({ kind: z.literal("UNPROCESSED_DRAFT"), unitId: z.uuid(), sourceFileId: z.uuid(), mappingRevision: z.uuid(), updatedAt: z.iso.datetime({ offset: true }) }).strict()]);

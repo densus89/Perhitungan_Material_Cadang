@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createUserAdminDependencies, inviteUser } from "../../../src/server/admin/user-service";
 import { bootstrapAdmin, createBootstrapGateway, parseBootstrapConfig } from "../../../scripts/bootstrap-admin.mjs";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../../src/lib/supabase/database.types";
+import type { Database } from "../../../src/lib/supabase/database";
 import type { Actor } from "../../../src/domain/access";
 vi.mock("server-only", () => ({}));
 const actor: Actor = { userId: "40000000-0000-4000-8000-000000000001", role: "RST_ADMIN", email: "admin@pln.co.id", displayName: "Admin", status: "ACTIVE", unitIndukIds: [] };

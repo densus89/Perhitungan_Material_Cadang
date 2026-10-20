@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Actor } from "../../domain/access";
 import { inviteUserSchema, updateUserAccessSchema, type InviteUserInput, type UpdateUserAccessInput, type ManagedUser } from "../../domain/user-admin";
-import type { Database } from "../../lib/supabase/database.types";
+import type { Database } from "../../lib/supabase/database";
 
 type AuditEvent = Database["public"]["Tables"]["audit_events"]["Insert"];
 export type AccessReplaceOutcome = "UPDATED" | "FAILED" | "FORBIDDEN" | "ACCESS_CONFLICT";

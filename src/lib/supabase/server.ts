@@ -2,7 +2,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getPublicEnv } from "../../config/env";
-import type { Database } from "./database.types";
+import type { Database } from "./database";
 
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();

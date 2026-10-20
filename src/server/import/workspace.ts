@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json } from "../../lib/supabase/database.types";
+import type { Database, Json } from "../../lib/supabase/database";
 import type { Actor } from "../../domain/access";
 import { importReviewSchema, stageSchema, type ImportDraft, type ImportReview, type ImportReviewQuery } from "../../domain/asset-import/schemas";
 import type { ImportDependencies } from "./dependencies";

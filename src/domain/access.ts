@@ -1,4 +1,4 @@
-import type { Database } from "../lib/supabase/database.types";
+import type { Database } from "../lib/supabase/database";
 
 export type AppRole = Database["public"]["Enums"]["app_role"];
 export type Permission = "MANAGE_USERS" | "REVIEW_DATASET" | "WRITE_OWN_UNIT" | "READ_NATIONAL_SUMMARY";
