@@ -9,9 +9,13 @@ export function fakeDependencies() {
   const objects = new Map<string, Uint8Array>();
   const events: string[] = [];
   let failTable = "";
+  let nowMs = Date.parse("2026-10-16T00:00:00.000Z");
   const matching = (record: Record<string, unknown>, filters: Record<string, unknown>) => Object.entries(filters).every(([key, value]) => record[key] === value);
+  const activeLease = (run: Record<string, unknown>) => typeof run.processing_lease_token === "string" && Date.parse(String(run.processing_lease_expires_at)) > nowMs;
+  const publicRun = (run: Record<string, unknown>) => { const copy = structuredClone(run); delete copy.processing_lease_token; return copy; };
+  const manifest = (runId: string) => (tables.asset_import_chunks ?? []).filter((row) => row.import_run_id === runId).sort((a, b) => Number(a.chunk_index) - Number(b.chunk_index));
   const deps: ImportDependencies = {
-    id: randomUUID, now: () => "2026-10-16T00:00:00.000Z",
+    id: randomUUID, now: () => new Date(nowMs).toISOString(),
     async reviewPage(unitId, runId, options) {
       const rows = (tables.asset_snapshot_rows ?? []).filter(row => row.unit_induk_id === unitId && row.import_run_id === runId).filter(row => {
         const value = tables.asset_valuations?.find(value => value.asset_row_id === row.id && value.unit_induk_id === unitId && value.import_run_id === runId);
@@ -41,6 +45,76 @@ export function fakeDependencies() {
       await deps.insert("asset_snapshot_rows", rows);
       await deps.insert("asset_valuations", valuations);
     },
+    async processingRun(importId) {
+      const run = (tables.asset_import_runs ?? []).find((row) => row.import_session_id === importId && row.status === "PROCESSING");
+      return run ? publicRun(run) as never : null;
+    },
+    async claimProcessing(actorId, input) {
+      const session = (tables.import_sessions ?? []).find((row) => row.id === input.importId);
+      if (!session || session.mapping_revision !== input.expectedRevision) throw new Error("Processing expectations changed");
+      let run = (tables.asset_import_runs ?? []).find((row) => row.import_session_id === input.importId && row.status === "PROCESSING");
+      if (!run) {
+        if (input.leaseToken) throw new Error("Cannot renew missing lease");
+        run = {
+          ...input.run,
+          import_session_id: input.importId,
+          unit_induk_id: session.unit_induk_id,
+          dataset_version_id: session.dataset_version_id,
+          created_by: actorId,
+          mapping_revision: input.expectedRevision,
+          status: "PROCESSING",
+          processing_protocol_version: "resumable-v1",
+          processing_lease_token: null,
+          processing_lease_expires_at: null,
+          processing_attempts: 0,
+          last_progress_at: null,
+          finalized_rows_hash: null,
+          finalized_valuations_hash: null,
+          failure_code: null,
+          completed_at: null,
+          created_at: deps.now(),
+        };
+        (tables.asset_import_runs ??= []).push(run);
+      }
+      const evidenceKeys = ["id", "expected_row_count", "expected_valuation_count", "source_hash", "mapping_hash", "rule_version", "expected_rows_hash", "expected_valuations_hash"];
+      if (run.processing_protocol_version !== "resumable-v1" || evidenceKeys.some((key) => run![key] !== (input.run as unknown as Record<string, unknown>)[key])) throw new Error("Processing expectations changed");
+      let token: string;
+      if (input.leaseToken) {
+        if (!activeLease(run) || run.processing_lease_token !== input.leaseToken) throw new Error("Cannot renew stale lease");
+        token = input.leaseToken;
+      } else {
+        if (activeLease(run)) throw new Error("Processing lease conflict");
+        token = randomUUID();
+      }
+      Object.assign(run, { processing_lease_token: token, processing_lease_expires_at: new Date(nowMs + 240_000).toISOString(), last_progress_at: deps.now(), processing_attempts: Number(run.processing_attempts ?? 0) + 1 });
+      return { run: publicRun(run) as never, leaseToken: token, completedChunks: manifest(String(run.id)).map((entry) => ({ chunkIndex: Number(entry.chunk_index), rowCount: Number(entry.row_count) })) };
+    },
+    async completedChunks(runId) {
+      return manifest(runId).map((entry) => ({ chunkIndex: Number(entry.chunk_index), rowCount: Number(entry.row_count) }));
+    },
+    async commitChunk(actorId, runId, leaseToken, chunk) {
+      const run = (tables.asset_import_runs ?? []).find((row) => row.id === runId);
+      if (!run || run.status !== "PROCESSING" || run.created_by !== actorId || !activeLease(run) || run.processing_lease_token !== leaseToken) throw new Error("Invalid processing lease");
+      const expectedCount = Math.min(2_000, Number(run.expected_row_count) - chunk.startOrdinal);
+      if (chunk.chunkIndex < 0 || chunk.startOrdinal !== chunk.chunkIndex * 2_000 || chunk.rowCount !== expectedCount || chunk.rows.length !== chunk.rowCount || chunk.valuations.length !== chunk.rowCount) throw new Error("Invalid chunk bounds or hashes");
+      const prior = manifest(runId).find((entry) => entry.chunk_index === chunk.chunkIndex);
+      if (prior) {
+        if (prior.start_ordinal !== chunk.startOrdinal || prior.row_count !== chunk.rowCount || prior.rows_hash !== chunk.rowsHash || prior.valuations_hash !== chunk.valuationsHash) throw new Error("Chunk replay mismatch");
+        return;
+      }
+      if (["asset_snapshot_rows", "asset_valuations", "asset_import_chunks"].includes(failTable)) throw new Error("private service failure secret token");
+      const rowIds = chunk.rows.map((row) => String(row.id));
+      if (new Set(rowIds).size !== chunk.rowCount || chunk.valuations.some((value, index) => value.asset_row_id !== rowIds[index])) throw new Error("Packed import ownership or pairing mismatch");
+      (tables.asset_snapshot_rows ??= []).push(...structuredClone(chunk.rows) as unknown as Record<string, unknown>[]);
+      (tables.asset_valuations ??= []).push(...structuredClone(chunk.valuations) as unknown as Record<string, unknown>[]);
+      (tables.asset_import_chunks ??= []).push({ import_run_id: runId, unit_induk_id: run.unit_induk_id, chunk_index: chunk.chunkIndex, start_ordinal: chunk.startOrdinal, row_count: chunk.rowCount, rows_hash: chunk.rowsHash, valuations_hash: chunk.valuationsHash, completed_by: actorId, completed_at: deps.now() });
+      run.last_progress_at = deps.now();
+    },
+    async releaseProcessing(actorId, runId, leaseToken) {
+      const run = (tables.asset_import_runs ?? []).find((row) => row.id === runId);
+      if (!run || run.created_by !== actorId || !activeLease(run) || run.processing_lease_token !== leaseToken) throw new Error("Invalid processing lease");
+      Object.assign(run, { processing_lease_token: null, processing_lease_expires_at: null });
+    },
     async update(table, filters, values) {
       for (const row of tables[table] ?? []) if (matching(row, filters)) Object.assign(row, values);
     },
@@ -51,11 +125,16 @@ export function fakeDependencies() {
       if (!bytes) throw new Error("Missing private storage object");
       return { bytes, size: bytes.length, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
     },
-    async finalize(actorId, runId) {
+    async finalize(actorId, runId, leaseToken) {
       events.push("finalize");
       const run = tables.asset_import_runs.find((row) => row.id === runId)!;
       const session = tables.import_sessions.find((row) => row.id === run.import_session_id)!;
       const sheet = tables.import_sheets.find((row) => row.import_session_id === session.id && row.selected)!;
+      if (run.processing_protocol_version === "resumable-v1") {
+        if (!leaseToken || !activeLease(run) || run.processing_lease_token !== leaseToken) throw new Error("Invalid processing lease");
+        const chunks = manifest(runId), expectedChunks = Math.ceil(Number(run.expected_row_count) / 2_000);
+        if (chunks.length !== expectedChunks || chunks.some((entry, index) => Number(entry.chunk_index) !== index || Number(entry.start_ordinal) !== index * 2_000 || Number(entry.row_count) !== Math.min(2_000, Number(run.expected_row_count) - index * 2_000))) throw new Error("Incomplete chunk manifest");
+      }
       if (run.mapping_revision !== session.mapping_revision || sheet.layout_hash !== run.mapping_hash) throw new Error("Stale finalization");
       const rows = tables.asset_snapshot_rows.filter((row) => row.import_run_id === runId), values = tables.asset_valuations.filter((row) => row.import_run_id === runId);
       if (rows.length !== run.expected_row_count || values.length !== run.expected_valuation_count) throw new Error("Incomplete finalized import");
@@ -82,7 +161,12 @@ export function fakeDependencies() {
       if (session.mapping_revision !== input.expectedRevision || (tables.asset_import_runs ?? []).some((row) => row.import_session_id === session.id && row.status === "PROCESSING")) throw new Error("Reservation conflict");
       await deps.insert("asset_import_runs", [{ ...input.run, import_session_id: input.importId, unit_induk_id: String(session.unit_induk_id), dataset_version_id: String(session.dataset_version_id), created_by: actorId, mapping_revision: input.expectedRevision, status: "PROCESSING" }]);
     },
-    async failRun(_actorId, runId) { const run = tables.asset_import_runs.find((row) => row.id === runId); if (run?.status === "PROCESSING") Object.assign(run, { status: "FAILED", failure_code: "PROCESS_FAILED" }); },
+    async failRun(actorId, runId, leaseToken) {
+      const run = tables.asset_import_runs.find((row) => row.id === runId);
+      if (run?.processing_protocol_version === "resumable-v1" && activeLease(run) && (!leaseToken || run.processing_lease_token !== leaseToken)) throw new Error("Invalid processing lease");
+      if (run?.created_by !== actorId) throw new Error("Wrong actor");
+      if (run?.status === "PROCESSING") Object.assign(run, { status: "FAILED", failure_code: "PROCESS_FAILED" });
+    },
     async sealComparison(_actorId, runId, baseVersionId, comparisonId) {
       const run = tables.asset_import_runs.find((row) => row.id === runId)!, session = tables.import_sessions.find((row) => row.id === run.import_session_id)!;
       const dataset = tables.datasets.find((row) => row.id === session.dataset_id)!;
@@ -97,5 +181,5 @@ export function fakeDependencies() {
       events.push("submit"); tables.dataset_versions.find((row) => row.id === versionId)!.status = "PENDING_RST";
     },
   };
-  return { deps, tables, objects, events, fail(table: string) { failTable = table; } };
+  return { deps, tables, objects, events, fail(table: string) { failTable = table; }, advance(milliseconds: number) { nowMs += milliseconds; } };
 }

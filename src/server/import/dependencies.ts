@@ -5,6 +5,7 @@ import type { Database } from "../../lib/supabase/database";
 import { MAX_WORKBOOK_BYTES, importReviewQuerySchema, type ImportReviewQuery } from "../../domain/asset-import/schemas";
 import type { AssetSheetMapping } from "../../domain/asset-import/types";
 import type { Json } from "../../lib/supabase/database";
+import { ASSET_CHUNK_SIZE, type AssetChunk, type CompletedAssetChunk } from "./resumable";
 
 export type ImportTable = keyof Database["public"]["Tables"];
 export type Row<T extends ImportTable> = Database["public"]["Tables"][T]["Row"];
@@ -13,6 +14,9 @@ export type ReviewPageRow = Pick<Row<"asset_snapshot_rows">, "id" | "source_row_
 export type ReviewPageValue = Pick<Row<"asset_valuations">, "asset_row_id" | "nilai_abc" | "value_source" | "age_status" | "selected_donor_ids" | "donor_evidence" | "calculation_evidence">;
 export interface MappingReplacement { importId: string; sheetId: string; expectedRevision: string; mapping: AssetSheetMapping; layoutHash: string; canonicalHash: string; ruleVersion: string; sourceHash: string }
 export interface ProcessingReservation { importId: string; expectedRevision: string; run: { id: string; expected_row_count: number; expected_valuation_count: number; source_hash: string; mapping_hash: string; rule_version: string; expected_rows_hash: string; expected_valuations_hash: string } }
+export interface ProcessingClaimInput extends ProcessingReservation { leaseToken?: string }
+export type ProcessingRun = Omit<Row<"asset_import_runs">, "processing_lease_token">;
+export interface ProcessingClaim { run: ProcessingRun; leaseToken: string; completedChunks: CompletedAssetChunk[] }
 export interface ExpectedSubmission { runId: string; mappingRevision: string; layoutHash: string; baseVersionId: string | null; comparisonId: string | null }
 export interface ImportDependencies {
   reviewPage(unitId: string, runId: string, options: ImportReviewQuery): Promise<{ rows: ReviewPageRow[]; totalRows: number }>;
@@ -23,14 +27,19 @@ export interface ImportDependencies {
   insert<T extends ImportTable>(table: T, rows: Insert<T>[]): Promise<Row<T>[]>;
   insertBatch<T extends "asset_snapshot_rows" | "asset_valuations" | "asset_version_changes">(table: T, rows: Insert<T>[]): Promise<void>;
   insertAssetBatch(actorId: string, runId: string, rows: Insert<"asset_snapshot_rows">[], valuations: Insert<"asset_valuations">[]): Promise<void>;
+  processingRun(importId: string): Promise<ProcessingRun | null>;
+  claimProcessing(actorId: string, input: ProcessingClaimInput): Promise<ProcessingClaim>;
+  completedChunks(runId: string): Promise<CompletedAssetChunk[]>;
+  commitChunk(actorId: string, runId: string, leaseToken: string, chunk: AssetChunk<Insert<"asset_snapshot_rows">, Insert<"asset_valuations">>): Promise<void>;
+  releaseProcessing(actorId: string, runId: string, leaseToken: string): Promise<void>;
   update<T extends ImportTable>(table: T, filters: Partial<Row<T>>, values: Database["public"]["Tables"][T]["Update"]): Promise<void>;
   remove<T extends ImportTable>(table: T, filters: Partial<Row<T>>): Promise<void>;
   sign(path: string): Promise<{ path: string; token: string }>;
   download(path: string): Promise<{ bytes: Uint8Array; size: number; mimeType: string }>;
-  finalize(actorId: string, runId: string): Promise<void>;
+  finalize(actorId: string, runId: string, leaseToken?: string): Promise<void>;
   replaceMapping(actorId: string, input: MappingReplacement): Promise<void>;
   reserve(actorId: string, input: ProcessingReservation): Promise<void>;
-  failRun(actorId: string, runId: string): Promise<void>;
+  failRun(actorId: string, runId: string, leaseToken?: string): Promise<void>;
   sealComparison(actorId: string, runId: string, baseVersionId: string | null, comparisonId: string | null): Promise<void>;
   submit(actorId: string, versionId: string, expected: ExpectedSubmission): Promise<void>;
 }
@@ -54,6 +63,30 @@ export function packedRecords(records: Record<string, unknown>[], columns: reado
   if (!records.length || !columns.length) throw new Error("Empty packed batch");
   if (records.some((record) => Object.keys(record).length !== columns.length || columns.some((column) => !(column in record)))) throw new Error("Inconsistent packed batch");
   return records.map((record) => columns.map((column) => record[column] === undefined ? null : record[column])) as Json;
+}
+
+const PROCESSING_RUN_COLUMNS = [
+  "id", "import_session_id", "unit_induk_id", "dataset_version_id", "created_by", "mapping_revision", "status",
+  "expected_row_count", "expected_valuation_count", "source_hash", "mapping_hash", "rule_version", "expected_rows_hash",
+  "expected_valuations_hash", "finalized_rows_hash", "finalized_valuations_hash", "failure_code", "created_at", "completed_at",
+  "processing_lease_expires_at", "last_progress_at", "processing_attempts", "processing_protocol_version",
+] as const satisfies readonly (keyof ProcessingRun)[];
+
+function publicProcessingRun(value: Record<string, unknown>): ProcessingRun {
+  const result: Record<string, unknown> = {};
+  for (const column of PROCESSING_RUN_COLUMNS) result[column] = value[column] ?? null;
+  return result as ProcessingRun;
+}
+
+function completedChunkList(value: unknown): CompletedAssetChunk[] {
+  if (!Array.isArray(value)) throw new Error("Invalid processing manifest");
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object") throw new Error("Invalid processing manifest");
+    const chunkIndex = Number((entry as Record<string, unknown>).chunk_index);
+    const rowCount = Number((entry as Record<string, unknown>).row_count);
+    if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || !Number.isSafeInteger(rowCount) || rowCount < 1 || rowCount > ASSET_CHUNK_SIZE) throw new Error("Invalid processing manifest");
+    return { chunkIndex, rowCount };
+  });
 }
 
 /** The generic adapter never takes its table/filters from a request body. */
@@ -128,7 +161,7 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (count !== rows.length) throw new Error("Incomplete import batch");
     },
     async insertAssetBatch(actorId, runId, rows, valuations) {
-      if (!rows.length || rows.length > 3000 || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
+      if (!rows.length || rows.length > ASSET_CHUNK_SIZE || valuations.length !== rows.length) throw new Error("Invalid asset import batch");
       const { data, error } = await client.rpc("insert_asset_import_batch", {
         p_actor_id: actorId,
         p_run_id: runId,
@@ -138,6 +171,54 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (error || data !== rows.length) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "insertAssetBatch", code: error?.code ?? "COUNT_MISMATCH" }));
       check(error);
       if (data !== rows.length) throw new Error("Incomplete asset import batch");
+    },
+    async processingRun(importId) {
+      const { data, error } = await client.from("asset_import_runs").select(PROCESSING_RUN_COLUMNS.join(",")).eq("import_session_id", importId).eq("status", "PROCESSING").maybeSingle();
+      check(error);
+      return data ? publicProcessingRun(data as unknown as Record<string, unknown>) : null;
+    },
+    async claimProcessing(actorId, input) {
+      const { data, error } = await client.rpc("claim_asset_import_processing", {
+        p_actor_id: actorId,
+        p_import_id: input.importId,
+        p_expected_revision: input.expectedRevision,
+        p_run: input.run,
+        p_lease_token: (input.leaseToken ?? null) as never,
+      });
+      if (error) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "claimProcessing", code: error.code ?? "UNKNOWN" }));
+      check(error);
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid processing claim");
+      const record = data as Record<string, unknown>;
+      if (typeof record.processing_lease_token !== "string") throw new Error("Invalid processing claim");
+      return { run: publicProcessingRun(record), leaseToken: record.processing_lease_token, completedChunks: completedChunkList(record.completed_chunks) };
+    },
+    async completedChunks(runId) {
+      const { data, error } = await client.from("asset_import_chunks").select("chunk_index,row_count").eq("import_run_id", runId).order("chunk_index", { ascending: true });
+      check(error);
+      return completedChunkList(data ?? []);
+    },
+    async commitChunk(actorId, runId, leaseToken, chunk) {
+      if (!leaseToken || chunk.rowCount !== chunk.rows.length || chunk.rowCount !== chunk.valuations.length || chunk.rowCount < 1 || chunk.rowCount > ASSET_CHUNK_SIZE || chunk.startOrdinal !== chunk.chunkIndex * ASSET_CHUNK_SIZE) throw new Error("Invalid asset import chunk");
+      const { data, error } = await client.rpc("commit_asset_import_chunk", {
+        p_actor_id: actorId,
+        p_run_id: runId,
+        p_lease_token: leaseToken,
+        p_chunk_index: chunk.chunkIndex,
+        p_start_ordinal: chunk.startOrdinal,
+        p_rows: packedRecords(chunk.rows as Record<string, unknown>[], ASSET_ROW_BATCH_COLUMNS),
+        p_valuations: packedRecords(chunk.valuations as Record<string, unknown>[], ASSET_VALUATION_BATCH_COLUMNS),
+        p_rows_hash: chunk.rowsHash,
+        p_valuations_hash: chunk.valuationsHash,
+      });
+      if (error || data !== chunk.rowCount) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "commitChunk", code: error?.code ?? "COUNT_MISMATCH" }));
+      check(error);
+      if (data !== chunk.rowCount) throw new Error("Incomplete asset import chunk");
+    },
+    async releaseProcessing(actorId, runId, leaseToken) {
+      const { data, error } = await client.rpc("release_asset_import_processing", { p_actor_id: actorId, p_run_id: runId, p_lease_token: leaseToken });
+      if (error) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "releaseProcessing", code: error.code ?? "UNKNOWN" }));
+      check(error);
+      if (data !== runId) throw new Error("Incomplete processing release");
     },
     async update(table, filters, values) { const { error } = await client.from(table).update(values as never).match(filters); check(error); },
     async remove(table, filters) { const { error } = await client.from(table).delete().match(filters); check(error); },
@@ -155,14 +236,20 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (!data || data.size !== size) throw new Error("Incomplete stored workbook");
       return { bytes: new Uint8Array(await data.arrayBuffer()), size, mimeType };
     },
-    async finalize(actorId, runId) { const { error } = await client.rpc("finalize_asset_import_run", { p_actor_id: actorId, p_run_id: runId }); check(error); },
+    async finalize(actorId, runId, leaseToken) {
+      const args = leaseToken ? { p_actor_id: actorId, p_run_id: runId, p_lease_token: leaseToken } : { p_actor_id: actorId, p_run_id: runId };
+      const { error } = await client.rpc("finalize_asset_import_run", args); check(error);
+    },
     async replaceMapping(actorId, input) { const { error } = await client.rpc("replace_asset_import_mapping", { p_actor_id: actorId, p_import_id: input.importId, p_sheet_id: input.sheetId, p_expected_revision: input.expectedRevision, p_mapping: input.mapping as unknown as Json, p_layout_hash: input.layoutHash, p_canonical_hash: input.canonicalHash, p_rule_version: input.ruleVersion, p_source_hash: input.sourceHash }); check(error); },
     async reserve(actorId, input) {
       const { error } = await client.rpc("reserve_asset_import_run", { p_actor_id: actorId, p_import_id: input.importId, p_expected_revision: input.expectedRevision, p_run: input.run });
       if (error) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "reserve", code: error.code }));
       check(error);
     },
-    async failRun(actorId, runId) { const { error } = await client.rpc("fail_asset_import_run", { p_actor_id: actorId, p_run_id: runId }); check(error); },
+    async failRun(actorId, runId, leaseToken) {
+      const args = leaseToken ? { p_actor_id: actorId, p_run_id: runId, p_lease_token: leaseToken } : { p_actor_id: actorId, p_run_id: runId };
+      const { error } = await client.rpc("fail_asset_import_run", args); check(error);
+    },
     async sealComparison(actorId, runId, baseVersionId, comparisonId) { const { error } = await client.rpc("complete_asset_import_comparison", { p_actor_id: actorId, p_run_id: runId, p_base_version_id: baseVersionId!, p_comparison_id: comparisonId! }); check(error); },
     async submit(actorId, versionId, expected) { const { error } = await client.rpc("submit_asset_version", { p_actor_id: actorId, p_version_id: versionId, p_expected_run_id: expected.runId, p_expected_mapping_revision: expected.mappingRevision, p_expected_layout_hash: expected.layoutHash, p_expected_base_version_id: expected.baseVersionId!, p_expected_comparison_id: expected.comparisonId! }); check(error); },
   };
