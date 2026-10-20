@@ -21,7 +21,7 @@ describe("locked import interleavings", () => {
   });
   it("an obsolete processing request loses atomically to mapping replacement", async () => {
     const f = await prepared();
-    Object.assign(f.deps, { reserve: async () => { throw new Error("stale mapping revision"); } });
+    Object.assign(f.deps, { claimProcessing: async () => { throw new Error("stale mapping revision"); } });
     await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "CONFLICT" });
     expect(f.tables.asset_import_runs ?? []).toHaveLength(0);
   });
@@ -30,14 +30,13 @@ describe("locked import interleavings", () => {
     let releaseDownloads!: () => void, releaseFirst!: () => void;
     const downloadsReady = new Promise<void>((resolve) => { releaseDownloads = resolve; });
     const secondReserved = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    const download = f.deps.download, reserve = f.deps.reserve; let downloads = 0, reservations = 0;
+    const download = f.deps.download, claimProcessing = f.deps.claimProcessing; let downloads = 0, claims = 0;
     // Both preflights finish before either can reserve; hold the winner PROCESSING
     // until the second reservation has actually attempted the locked operation.
     f.deps.download = async (path) => { const bytes = await download(path); if (++downloads === 2) releaseDownloads(); await downloadsReady; return bytes; };
-    f.deps.reserve = async (...args) => {
-      const ordinal = ++reservations;
-      try { await reserve(...args); } finally { if (ordinal === 2) releaseFirst(); }
-      if (ordinal === 1) await secondReserved;
+    f.deps.claimProcessing = async (...args) => {
+      const ordinal = ++claims;
+      try { const claim = await claimProcessing(...args); if (ordinal === 1) await secondReserved; return claim; } finally { if (ordinal === 2) releaseFirst(); }
     };
     const results = await Promise.allSettled([processStoredWorkbook(actor, f.created.importId, f.deps), processStoredWorkbook(actor, f.created.importId, f.deps)]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);

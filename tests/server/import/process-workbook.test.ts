@@ -44,7 +44,7 @@ describe("authoritative workbook processing", () => {
     expect(result.summary?.rowCount).toBe(1001); expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:"))).toEqual(["insert:asset_snapshot_rows:1001"]);
     expect(f.events.filter((event) => event.startsWith("insert:asset_valuations:"))).toEqual(["insert:asset_valuations:1001"]);
   }, 30000);
-  it("caps packed 3000-row writes at two concurrent hosted requests", async () => {
+  it("caps legacy packed 2000-row writes at two concurrent hosted requests", async () => {
     let active = 0, maximum = 0;
     const sizes: number[] = [];
     const deps = {
@@ -58,7 +58,46 @@ describe("authoritative workbook processing", () => {
     const records = Array.from({ length: 6501 }, (_, id) => ({ id })) as never;
     await insertInWindows("actor", "run", records, records, deps);
     expect(maximum).toBe(2);
-    expect(sizes).toEqual([3000, 3000, 501]);
+    expect(sizes).toEqual([2000, 2000, 2000, 501]);
+  });
+  it("resumes a 24001-row import in the same run with deterministic row identities", async () => {
+    const f = await prepared(Array.from({ length: 24_001 }, (_, index) => assetRow.map((value, column) => column === 4 ? String(index).padStart(6, "0") : value)));
+    const first = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(first.stage).toBe("PROCESSING");
+    await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" });
+    expect(f.tables.asset_import_runs).toHaveLength(1);
+    expect(f.tables.asset_import_chunks).toHaveLength(12);
+    expect(f.tables.asset_snapshot_rows).toHaveLength(24_000);
+    const runId = String(f.tables.asset_import_runs[0].id), firstId = String(f.tables.asset_snapshot_rows[0].id);
+    const second = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(second.stage).toBe("READY_TO_SUBMIT");
+    expect(f.tables.asset_import_runs).toHaveLength(1);
+    expect(f.tables.asset_import_chunks).toHaveLength(13);
+    expect(f.tables.asset_snapshot_rows).toHaveLength(24_001);
+    expect(f.tables.asset_import_runs[0].id).toBe(runId);
+    expect(f.tables.asset_snapshot_rows[0].id).toBe(firstId);
+  }, 180_000);
+  it("recovers a lost chunk response by replaying the marker without duplicate data", async () => {
+    const f = await prepared();
+    const commit = f.deps.commitChunk; let loseResponse = true;
+    f.deps.commitChunk = async (...args) => { await commit(...args); if (loseResponse) { loseResponse = false; throw new Error("synthetic connection loss"); } };
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
+    expect(f.tables.asset_import_runs).toHaveLength(1); expect(f.tables.asset_import_chunks).toHaveLength(1);
+    const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(result.stage).toBe("READY_TO_SUBMIT");
+    expect(f.tables.asset_import_runs).toHaveLength(1); expect(f.tables.asset_snapshot_rows).toHaveLength(1); expect(f.tables.asset_valuations).toHaveLength(1);
+  });
+  it("keeps an interrupted lease exclusive, then resumes the same run after expiry", async () => {
+    const f = await prepared();
+    const commit = f.deps.commitChunk, release = f.deps.releaseProcessing;
+    f.deps.commitChunk = async () => { throw new Error("synthetic connection loss"); };
+    f.deps.releaseProcessing = async () => { throw new Error("synthetic release loss"); };
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
+    const runId = f.tables.asset_import_runs[0].id;
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "CONFLICT" });
+    f.advance(241_000); f.deps.commitChunk = commit; f.deps.releaseProcessing = release;
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).resolves.toMatchObject({ stage: "READY_TO_SUBMIT" });
+    expect(f.tables.asset_import_runs).toHaveLength(1); expect(f.tables.asset_import_runs[0].id).toBe(runId);
   });
   it("downloads stored bytes, finalizes rows and summary, then permits submission without activation", async () => {
     const f = await prepared(); const result = await processStoredWorkbook(actor, f.created.importId, f.deps);
@@ -76,12 +115,13 @@ describe("authoritative workbook processing", () => {
     await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PREVIEW_MISMATCH" }); expect(f.tables.asset_snapshot_rows ?? []).toHaveLength(0);
     f.objects.set(f.created.upload!.path, new Uint8Array([0])); await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "SOURCE_MISMATCH" });
   });
-  it("preserves prior current run on failed batch and retries with a new run", async () => {
+  it("preserves prior current run on failed chunk and retries the same resumable run", async () => {
     const f = await prepared(); await processStoredWorkbook(actor, f.created.importId, f.deps); const prior = f.tables.import_sessions[0].current_run_id;
     f.fail("asset_valuations"); await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
-    expect(f.tables.asset_import_runs[1]).toMatchObject({ status: "FAILED", failure_code: "PROCESS_FAILED" }); expect(f.tables.import_sessions[0].current_run_id).toBe(prior);
-    expect((await loadAssetImport(actor, f.created.importId, f.deps)).stage).toBe("FAILED");
-    f.fail(""); await processStoredWorkbook(actor, f.created.importId, f.deps); expect(f.tables.import_sessions[0].current_run_id).not.toBe(prior); expect(f.tables.asset_import_runs).toHaveLength(3);
+    expect(f.tables.asset_import_runs[1]).toMatchObject({ status: "PROCESSING", failure_code: null }); expect(f.tables.import_sessions[0].current_run_id).toBe(prior);
+    expect((await loadAssetImport(actor, f.created.importId, f.deps)).stage).toBe("PROCESSING");
+    const retryRun = f.tables.asset_import_runs[1].id;
+    f.fail(""); await processStoredWorkbook(actor, f.created.importId, f.deps); expect(f.tables.import_sessions[0].current_run_id).toBe(retryRun); expect(f.tables.asset_import_runs).toHaveLength(2);
   });
   it("compares active rows only after finalization and retains the active pointer on submit", async () => {
     const f = await prepared(); await processStoredWorkbook(actor, f.created.importId, f.deps);
@@ -113,10 +153,10 @@ describe("authoritative workbook processing", () => {
   });
   it("detects incomplete persisted batches before finalization", async () => {
     const f = await prepared();
-    f.deps.insertAssetBatch = async (_actorId, _runId, rows) => { await f.deps.insert("asset_snapshot_rows", rows); };
-    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
-    expect(f.events).toContain("finalize");
-    expect(f.tables.asset_import_runs[0].status).toBe("FAILED");
+    f.deps.commitChunk = async (_actorId, _runId, _leaseToken, chunk) => { await f.deps.insert("asset_snapshot_rows", chunk.rows); };
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).resolves.toMatchObject({ stage: "PROCESSING" });
+    expect(f.events).not.toContain("finalize");
+    expect(f.tables.asset_import_runs[0].status).toBe("PROCESSING");
     expect(f.tables.import_sessions[0].current_run_id ?? null).toBeNull();
     expect(f.tables.asset_import_run_metadata ?? []).toHaveLength(0);
   });

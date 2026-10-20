@@ -12,6 +12,7 @@ import { compareAssetVersions } from "./compare-asset-versions";
 import type { UsefulLifeRule, UsefulLifeAlias } from "../../reference/useful-life-perdir-0299";
 import type { ImportDependencies, Row } from "./dependencies";
 import { ownedImport, assertEditable, verifiedBytes, confirmedMapping, ImportError, sha256, asJson, loadAssetImport } from "./service";
+import { ASSET_CHUNK_SIZE, deterministicAssetRowId, planMissingChunks } from "./resumable";
 
 /** PostgreSQL jsonb sorts keys by UTF-8 byte length, then byte value, and expands exponents. */
 export function postgresJsonb(value: unknown): string {
@@ -81,7 +82,7 @@ function compactDonorEvidence(evidence: ValuationEvidence, coordinateVersions: s
 }
 export async function insertInWindows(actorId: string, runId: string, rows: Row<"asset_snapshot_rows">[], valuations: Row<"asset_valuations">[], deps: ImportDependencies) {
   if (valuations.length !== rows.length) throw new Error("Mismatched asset import records");
-  const batches = Array.from({ length: Math.ceil(rows.length / 3000) }, (_, index) => ({ rows: rows.slice(index * 3000, (index + 1) * 3000), valuations: valuations.slice(index * 3000, (index + 1) * 3000) }));
+  const batches = Array.from({ length: Math.ceil(rows.length / ASSET_CHUNK_SIZE) }, (_, index) => ({ rows: rows.slice(index * ASSET_CHUNK_SIZE, (index + 1) * ASSET_CHUNK_SIZE), valuations: valuations.slice(index * ASSET_CHUNK_SIZE, (index + 1) * ASSET_CHUNK_SIZE) }));
   // Two compact requests overlap network serialization/latency while the
   // shared run lock still lets each RPC insert its paired rows atomically.
   for (let index = 0; index < batches.length; index += 2) {
@@ -133,17 +134,19 @@ async function persistComparison(actor: Actor, session: Row<"import_sessions">, 
   if (!previousRun) throw new ImportError("COMPARISON_FAILED");
   const before = await deps.list("asset_snapshot_rows", { import_run_id: previousRun.id, unit_induk_id: session.unit_induk_id });
   const beforeValues = await deps.list("asset_valuations", { import_run_id: previousRun.id, unit_induk_id: session.unit_induk_id });
-  const comparisonId = deps.id();
+  const existing = (await deps.list("version_comparisons", { from_run_id: previousRun.id, to_run_id: runId }))[0];
+  const comparisonId = existing?.id ?? deps.id();
   const { counts: kinds, changes } = compareAssetVersions({ before, after: rows, beforeValues, afterValues: values }, { comparisonId, unitId: session.unit_induk_id, fields: Object.values(columnPairs) });
-  await deps.insert("version_comparisons", [{ id: comparisonId, dataset_id: session.dataset_id, unit_induk_id: session.unit_induk_id, from_version_id: dataset.active_version_id, to_version_id: session.dataset_version_id, from_run_id: previousRun.id, to_run_id: runId, summary: asJson({ counts: kinds, before: summarize(before, beforeValues), after: summarize(rows, values) }), created_by: actor.userId }]);
-  for (let offset = 0; offset < changes.length; offset += 1000) await deps.insert("asset_version_changes", changes.slice(offset, offset + 1000));
+  if (!existing) await deps.insert("version_comparisons", [{ id: comparisonId, dataset_id: session.dataset_id, unit_induk_id: session.unit_induk_id, from_version_id: dataset.active_version_id, to_version_id: session.dataset_version_id, from_run_id: previousRun.id, to_run_id: runId, summary: asJson({ counts: kinds, before: summarize(before, beforeValues), after: summarize(rows, values) }), created_by: actor.userId }]);
+  const persistedKeys = new Set((await deps.list("asset_version_changes", { comparison_id: comparisonId })).map((change) => change.identity_key));
+  const missing = changes.filter((change) => !persistedKeys.has(change.identity_key));
+  for (let offset = 0; offset < missing.length; offset += 1000) await deps.insert("asset_version_changes", missing.slice(offset, offset + 1000));
   return { baseVersionId: dataset.active_version_id, comparisonId };
 }
 export async function processStoredWorkbook(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {
   const processStarted = performance.now();
   const phase = (name: string, rows?: number) => console.info("ASSET_IMPORT_PHASE " + JSON.stringify({ name, durationMs: Math.round(performance.now() - processStarted), ...(rows === undefined ? {} : { rows }) }));
   const { session, source, version } = await ownedImport(actor, importId, deps); assertEditable(version);
-  if ((await deps.list("asset_import_runs", { import_session_id: session.id, status: "PROCESSING" })).length) throw new ImportError("CONFLICT");
   const sheet = (await deps.list("import_sheets", { import_session_id: session.id, unit_induk_id: session.unit_induk_id, selected: true }))[0];
   if (!sheet) throw new ImportError("NOT_READY");
   const mapping = await confirmedMapping(sheet, deps);
@@ -154,11 +157,16 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   phase("parsed", parsed.rows?.length);
   if (parsed.canonicalHash !== diagnostics.data.canonicalHash || parsed.layoutHash !== diagnostics.data.layoutHash || parsed.layoutHash !== sheet.layout_hash) throw new ImportError("PREVIEW_MISMATCH");
   if (!parsed.rows?.length) throw new ImportError("NOT_READY");
-  const asOf = deps.now().slice(0, 10), references = await referenceContext(deps, diagnostics.data.ruleVersion, asOf);
+  const processing = await deps.processingRun(session.id);
+  const current = session.current_run_id ? (await deps.list("asset_import_runs", { id: session.current_run_id }))[0] : undefined;
+  const currentMetadata = current ? (await deps.list("asset_import_run_metadata", { import_run_id: current.id, unit_induk_id: session.unit_induk_id }))[0] : undefined;
+  const comparisonRetry = !processing && current?.status === "COMPLETE" && current.mapping_revision === session.mapping_revision && current.mapping_hash === parsed.layoutHash && current.rule_version === diagnostics.data.ruleVersion && currentMetadata && !currentMetadata.comparison_ready ? current : undefined;
+  const runId = processing?.id ?? comparisonRetry?.id ?? deps.id();
+  const asOf = (processing?.created_at ?? comparisonRetry?.created_at ?? deps.now()).slice(0, 10), references = await referenceContext(deps, diagnostics.data.ruleVersion, asOf);
   phase("references", parsed.rows.length);
   const unit = (await deps.list("unit_induk", { id: session.unit_induk_id }))[0];
   if (!unit) throw new ImportError("REFERENCE_UNAVAILABLE");
-  const runId = deps.id(), rowIds = parsed.rows.map(() => deps.id());
+  const rowIds = parsed.rows.map((row) => deterministicAssetRowId(runId, sheet.id, row.provenance.rowNumber));
   const assets: ComparableAsset[] = parsed.rows.map((row, index) => ({ ...row.asset, id: rowIds[index], provenance: row.provenance, coordinates: references.coordinateFor(row.asset) }));
   const candidates = [...assets, ...references.donors], pool = prepareComparablePool(candidates);
   const context = { asOf, rules: references.rules, aliases: references.aliases, candidates, cohort: candidates, candidatePool: pool, cohortPool: pool };
@@ -187,22 +195,31 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
   phase("valued", rows.length);
   const expected = persistedRecordHashes(rows, values);
   phase("hashed", rows.length);
-  // Atomic reservation rechecks revision and uniqueness after parsing/valuation.
-  try { await deps.reserve(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: { id: runId, expected_row_count: rows.length, expected_valuation_count: values.length, source_hash: source.sha256, mapping_hash: parsed.layoutHash, rule_version: diagnostics.data.ruleVersion, expected_rows_hash: expected.rowsHash, expected_valuations_hash: expected.valuationsHash } }); }
-  catch { throw new ImportError("CONFLICT"); }
-  phase("reserved", rows.length);
-  try {
-    await insertInWindows(actor.userId, runId, rows, values, deps);
-    phase("inserted", rows.length);
-    // The COMPLETE transition trigger recomputes persisted counts and hashes
-    // in the database transaction. Avoid returning and downloading hundreds
-    // of megabytes only to repeat that authoritative reconciliation in Node.
-    await deps.finalize(actor.userId, runId);
-    phase("finalized", rows.length);
-  } catch {
-    // Conditional update cannot rewrite a terminal run if finalization won a race.
-    await deps.failRun(actor.userId, runId);
-    throw new ImportError("PROCESS_FAILED");
+  const runEvidence = { id: runId, expected_row_count: rows.length, expected_valuation_count: values.length, source_hash: source.sha256, mapping_hash: parsed.layoutHash, rule_version: diagnostics.data.ruleVersion, expected_rows_hash: expected.rowsHash, expected_valuations_hash: expected.valuationsHash };
+  if (comparisonRetry) {
+    if (comparisonRetry.expected_row_count !== rows.length || comparisonRetry.expected_valuation_count !== values.length || comparisonRetry.source_hash !== source.sha256 || comparisonRetry.expected_rows_hash !== expected.rowsHash || comparisonRetry.expected_valuations_hash !== expected.valuationsHash) throw new ImportError("CONFLICT");
+  } else {
+    let claim;
+    try { claim = await deps.claimProcessing(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: runEvidence }); }
+    catch { throw new ImportError("CONFLICT"); }
+    phase("claimed", rows.length);
+    try {
+      const chunks = planMissingChunks(rows, values, claim.completedChunks.map((chunk) => chunk.chunkIndex));
+      for (let index = 0; index < chunks.length; index += 2) await Promise.all(chunks.slice(index, index + 2).map((chunk) => deps.commitChunk(actor.userId, runId, claim.leaseToken, chunk)));
+      phase("committed", chunks.reduce((total, chunk) => total + chunk.rowCount, 0));
+      const completed = await deps.completedChunks(runId);
+      if (completed.length < Math.ceil(rows.length / ASSET_CHUNK_SIZE)) {
+        await deps.releaseProcessing(actor.userId, runId, claim.leaseToken);
+        phase("partial", completed.reduce((total, chunk) => total + chunk.rowCount, 0));
+        return loadAssetImport(actor, importId, deps);
+      }
+      await deps.finalize(actor.userId, runId, claim.leaseToken);
+      phase("finalized", rows.length);
+      try { await deps.releaseProcessing(actor.userId, runId, claim.leaseToken); } catch { /* terminal run no longer needs the lease */ }
+    } catch {
+      try { await deps.releaseProcessing(actor.userId, runId, claim.leaseToken); } catch { /* lease expiry permits a later retry */ }
+      throw new ImportError("PROCESS_FAILED");
+    }
   }
   try {
     const comparison = await persistComparison(actor, session, runId, rows, values, deps);

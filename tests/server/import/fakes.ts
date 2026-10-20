@@ -77,7 +77,7 @@ export function fakeDependencies() {
         (tables.asset_import_runs ??= []).push(run);
       }
       const evidenceKeys = ["id", "expected_row_count", "expected_valuation_count", "source_hash", "mapping_hash", "rule_version", "expected_rows_hash", "expected_valuations_hash"];
-      if (run.processing_protocol_version !== "resumable-v1" || evidenceKeys.some((key) => run![key] !== (input.run as unknown as Record<string, unknown>)[key])) throw new Error("Processing expectations changed");
+      if (run.processing_protocol_version !== "resumable-v1" || run.mapping_revision !== input.expectedRevision || evidenceKeys.some((key) => run![key] !== (input.run as unknown as Record<string, unknown>)[key])) throw new Error("Processing expectations changed");
       let token: string;
       if (input.leaseToken) {
         if (!activeLease(run) || run.processing_lease_token !== input.leaseToken) throw new Error("Cannot renew stale lease");
@@ -107,6 +107,7 @@ export function fakeDependencies() {
       if (new Set(rowIds).size !== chunk.rowCount || chunk.valuations.some((value, index) => value.asset_row_id !== rowIds[index])) throw new Error("Packed import ownership or pairing mismatch");
       (tables.asset_snapshot_rows ??= []).push(...structuredClone(chunk.rows) as unknown as Record<string, unknown>[]);
       (tables.asset_valuations ??= []).push(...structuredClone(chunk.valuations) as unknown as Record<string, unknown>[]);
+      events.push(`insert:asset_snapshot_rows:${chunk.rowCount}`); events.push(`insert:asset_valuations:${chunk.rowCount}`);
       (tables.asset_import_chunks ??= []).push({ import_run_id: runId, unit_induk_id: run.unit_induk_id, chunk_index: chunk.chunkIndex, start_ordinal: chunk.startOrdinal, row_count: chunk.rowCount, rows_hash: chunk.rowsHash, valuations_hash: chunk.valuationsHash, completed_by: actorId, completed_at: deps.now() });
       run.last_progress_at = deps.now();
     },
