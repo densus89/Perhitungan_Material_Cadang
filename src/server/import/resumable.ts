@@ -121,6 +121,6 @@ export function importProgress(expectedRows: number, completedChunks: readonly C
     expectedRows,
     completedChunks: completedChunks.length,
     expectedChunks,
-    percent: expectedRows === 0 ? 100 : Math.min(100, Math.round((completedRows / expectedRows) * 100)),
+    percent: expectedRows === 0 || completedRows === expectedRows ? 100 : Math.min(99, Math.floor((completedRows / expectedRows) * 100)),
   };
 }

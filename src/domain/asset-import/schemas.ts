@@ -23,6 +23,14 @@ export const sheetMappingSchema = z.strictObject({
 export const saveMappingSchema = z.strictObject({ importId: uuidSchema, mapping: sheetMappingSchema, ruleVersion: z.string().trim().min(1).max(200), layoutHash: hashSchema, canonicalHash: hashSchema });
 export const stageSchema = z.enum(["UPLOAD", "MAPPING", "READY_TO_PROCESS", "PROCESSING", "FAILED", "READY_TO_SUBMIT", "NEEDS_FIX", "PENDING_RST", "ACTIVE", "HISTORICAL"]);
 export const importSummarySchema = z.strictObject({ rowCount: z.number().int().nonnegative(), blockingErrors: z.number().int().nonnegative(), warningCount: z.number().int().nonnegative(), valueSources: z.record(z.string(), z.number().int().nonnegative()), conditions: z.record(z.string(), z.number().int().nonnegative()), issueCounts: z.record(z.string(), z.number().int().nonnegative()), totalNilaiABC: z.number().finite().nonnegative() });
+export const importProgressSchema = z.strictObject({
+  completedRows: z.number().int().nonnegative(), expectedRows: z.number().int().nonnegative(),
+  completedChunks: z.number().int().nonnegative(), expectedChunks: z.number().int().nonnegative(),
+  percent: z.number().int().min(0).max(100),
+}).superRefine((progress, context) => {
+  if (progress.completedRows > progress.expectedRows) context.addIssue({ code: "custom", message: "Completed rows exceed expected rows" });
+  if (progress.completedChunks > progress.expectedChunks) context.addIssue({ code: "custom", message: "Completed chunks exceed expected chunks" });
+});
 export const reviewFilterSchema = z.enum(["ALL", "ERROR", "WARNING", "ESTIMATED", "AGE_IMPUTED"]);
 export const importReviewQuerySchema = z.strictObject({
   offset: z.number().int().min(0).max(10000000), filter: reviewFilterSchema,
@@ -49,10 +57,11 @@ export const importResponseSchema = z.strictObject({
   ruleVersion: z.string().optional(),
   review: importReviewSchema.optional(),
   comparison: z.strictObject({ counts: z.record(z.string(), z.number().int().nonnegative()), sourceShifts: z.record(z.string(), z.number().int()), hasActiveVersion: z.boolean() }).optional(),
+  progress: importProgressSchema.optional(),
 });
 export type ImportResponse = z.infer<typeof importResponseSchema>;
 export type ImportReview = z.infer<typeof importReviewSchema>;
 export type ReviewFilter = z.infer<typeof reviewFilterSchema>;
 export type ImportReviewQuery = z.infer<typeof importReviewQuerySchema>;
 export type ImportReviewSearch = Omit<ImportReviewQuery, "offset" | "filter">;
-export interface ImportDraft { importId: string; datasetId: string; versionId: string; unitId: string; fileName: string; createdAt: string; stage: ImportResponse["stage"]; rowCount: number | null }
+export interface ImportDraft { importId: string; datasetId: string; versionId: string; unitId: string; fileName: string; createdAt: string; stage: ImportResponse["stage"]; rowCount: number | null; progress?: z.infer<typeof importProgressSchema> }

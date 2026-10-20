@@ -40,18 +40,20 @@ it("pushes issue/source/condition/search filters and exact count/range into Post
   expect(events).toContainEqual({ table: "asset_valuations", method: "limit", args: [100] });
   expect(events.filter(event => event.method === "range" || event.table === "asset_valuations" && event.method === "in")).toHaveLength(2);
 });
-it("bounds and sanitizes RLS draft listing and excludes unexpectedly returned units", async () => {
-  const result = Promise.resolve({ data: [{ id: actor.userId, unit_induk_id: unitId, dataset_id: actor.userId, dataset_version_id: actor.userId, created_at: "2026-10-16T00:00:00Z", source_files: { original_name: "synthetic.xlsx", object_path: "secret" }, dataset_versions: { status: "READY_TO_SUBMIT" }, asset_import_runs: [{ status: "FAILED", created_at: "2026-10-16T01:00:00Z", expected_row_count: 5 }], import_sheets: [] }, { id: "foreign", unit_induk_id: "other", source_files: { original_name: "secret.xlsx" } }], error: null });
+it("bounds and sanitizes RLS draft listing and exposes stored completed/expected progress", async () => {
+  const result = Promise.resolve({ data: [{ id: actor.userId, unit_induk_id: unitId, dataset_id: actor.userId, dataset_version_id: actor.userId, created_at: "2026-10-16T00:00:00Z", source_files: { original_name: "synthetic.xlsx", object_path: "secret" }, dataset_versions: { status: "DRAFT" }, asset_import_runs: [{ status: "PROCESSING", created_at: "2026-10-16T01:00:00Z", expected_row_count: 6_000, asset_import_chunks: [{ chunk_index: 0, row_count: 2_000 }] }], import_sheets: [] }, { id: "foreign", unit_induk_id: "other", source_files: { original_name: "secret.xlsx" } }], error: null });
   const query = Object.assign(result, { order: vi.fn(), limit: vi.fn() }); query.order.mockReturnValue(query); query.limit.mockReturnValue(query);
   const inScope = vi.fn(() => query);
   const client = { from: () => ({ select: () => ({ in: inScope }) }) };
   const drafts = await loadImportDrafts(client as never, actor);
-  expect(inScope).toHaveBeenCalledWith("unit_induk_id", [unitId]); expect(query.limit).toHaveBeenCalledWith(50); expect(query.limit).toHaveBeenCalledWith(1, { referencedTable: "asset_import_runs" }); expect(drafts).toHaveLength(1); expect(drafts[0]).toMatchObject({ fileName: "synthetic.xlsx", stage: "FAILED" }); expect(JSON.stringify(drafts)).not.toContain("secret");
+  expect(inScope).toHaveBeenCalledWith("unit_induk_id", [unitId]); expect(query.limit).toHaveBeenCalledWith(50); expect(query.limit).toHaveBeenCalledWith(1, { referencedTable: "asset_import_runs" }); expect(drafts).toHaveLength(1); expect(drafts[0]).toMatchObject({ fileName: "synthetic.xlsx", stage: "PROCESSING", rowCount: 6_000, progress: { completedRows: 2_000, expectedRows: 6_000, percent: 33 } }); expect(JSON.stringify(drafts)).not.toContain("secret");
 });
 it("strict response allowlist rejects unbounded and sensitive review payloads", () => {
   const base = { importId: actor.userId, datasetId: actor.userId, versionId: actor.userId, stage: "READY_TO_SUBMIT" };
   expect(importResponseSchema.safeParse({ ...base, review: { totalRows: 0, offset: 0, hasMore: false, rows: [] } }).success).toBe(true);
   expect(importResponseSchema.safeParse({ ...base, review: { totalRows: 0, offset: 0, hasMore: false, rows: [], secret: "raw" } }).success).toBe(false);
+  expect(importResponseSchema.safeParse({ ...base, stage: "PROCESSING", progress: { completedRows: 2_000, expectedRows: 6_000, completedChunks: 1, expectedChunks: 3, percent: 33 } }).success).toBe(true);
+  expect(importResponseSchema.safeParse({ ...base, stage: "PROCESSING", progress: { completedRows: 6_001, expectedRows: 6_000, completedChunks: 4, expectedChunks: 3, percent: 101, processing_lease_token: "secret" } }).success).toBe(false);
 });
 it("counts every first-snapshot asset as an addition and scopes later comparison aggregates", async () => {
   const { deps, tables } = fakeDependencies();

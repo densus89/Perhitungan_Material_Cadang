@@ -105,4 +105,20 @@ describe("import mutation boundary", () => {
     const response = await assetImportMutation(request(createInput), createImportSchema, async () => { throw new Error("secret-fixture bearer token unit/other raw workbook"); });
     expect(response.status).toBe(500); expect(response.headers.get("cache-control")).toContain("private, no-store"); expect(await response.text()).not.toMatch(/secret-fixture|bearer|unit\/other|raw workbook/);
   });
+  it("returns 202 only for a strict processing response and keeps it private", async () => {
+    const response = await assetImportMutation(request(createInput), createImportSchema, async () => ({
+      importId: "30000000-0000-4000-8000-000000000001", datasetId: "30000000-0000-4000-8000-000000000002", versionId: "30000000-0000-4000-8000-000000000003", stage: "PROCESSING",
+      progress: { completedRows: 2_000, expectedRows: 6_000, completedChunks: 1, expectedChunks: 3, percent: 33 },
+    }));
+    expect(response.status).toBe(202); expect(response.headers.get("cache-control")).toContain("private, no-store");
+    expect(await response.json()).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 2_000, expectedRows: 6_000 } });
+    expect((await assetImportMutation(request(createInput), createImportSchema, accepted)).status).toBe(200);
+  });
+  it("rejects malformed progress instead of publishing client-like offsets", async () => {
+    const response = await assetImportMutation(request(createInput), createImportSchema, async () => ({
+      importId: "30000000-0000-4000-8000-000000000001", datasetId: "30000000-0000-4000-8000-000000000002", versionId: "30000000-0000-4000-8000-000000000003", stage: "PROCESSING",
+      progress: { completedRows: 7, expectedRows: 6, completedChunks: 2, expectedChunks: 1, percent: 101, leaseToken: "secret" },
+    }));
+    expect(response.status).toBe(500); expect(await response.text()).not.toContain("secret");
+  });
 });

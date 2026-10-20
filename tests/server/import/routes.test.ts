@@ -7,11 +7,12 @@ import { POST as mapping } from "../../../app/api/imports/[importId]/mapping/rou
 import { POST as processWorkbook } from "../../../app/api/imports/[importId]/process/route";
 import { POST as submit } from "../../../app/api/imports/[importId]/submit/route";
 import { actor, unitId } from "./fakes";
-const mocks = vi.hoisted(() => ({ requireActor: vi.fn(), session: vi.fn(), admin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireActor: vi.fn(), session: vi.fn(), admin: vi.fn(), process: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("../../../src/server/auth/actor", async (original) => ({ ...await original<object>(), requireActor: mocks.requireActor }));
 vi.mock("../../../src/lib/supabase/server", () => ({ createServerSupabaseClient: mocks.session }));
 vi.mock("../../../src/lib/supabase/admin", () => ({ createAdminSupabaseClient: mocks.admin }));
+vi.mock("../../../src/server/import/process-workbook", () => ({ processStoredWorkbook: mocks.process }));
 beforeEach(() => { vi.resetAllMocks(); mocks.requireActor.mockResolvedValue(actor); vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://material.example"); });
 it("all item handlers await params and reject invalid IDs before privileged work", async () => {
   const context = { params: Promise.resolve({ importId: "invalid" }) };
@@ -33,4 +34,12 @@ it("GET rejects a cross-unit import before constructing a privileged client", as
   mocks.session.mockResolvedValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { unit_induk_id: "other-unit" }, error: null }) }) }) }) });
   const result = await GET(new Request(`https://material.example/api/imports/${actor.userId}/`), { params: Promise.resolve({ importId: actor.userId }) });
   expect(result.status).toBe(404); expect(mocks.admin).not.toHaveBeenCalled();
+});
+it("process route returns 202 while persistent work remains and 200 when final", async () => {
+  mocks.session.mockResolvedValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { unit_induk_id: unitId }, error: null }) }) }) }) });
+  mocks.process.mockResolvedValueOnce({ importId: actor.userId, datasetId: actor.userId, versionId: actor.userId, stage: "PROCESSING", progress: { completedRows: 2_000, expectedRows: 6_000, completedChunks: 1, expectedChunks: 3, percent: 33 } });
+  const context = { params: Promise.resolve({ importId: actor.userId }) }, request = () => new Request(`https://material.example/api/imports/${actor.userId}/process/`, { method: "POST", headers: { Origin: "https://material.example", "Content-Type": "application/json" }, body: "{}" });
+  const partial = await processWorkbook(request(), context); expect(partial.status).toBe(202); expect(partial.headers.get("cache-control")).toContain("private, no-store");
+  mocks.process.mockResolvedValueOnce({ importId: actor.userId, datasetId: actor.userId, versionId: actor.userId, stage: "READY_TO_SUBMIT" });
+  expect((await processWorkbook(request(), context)).status).toBe(200);
 });

@@ -4,6 +4,7 @@ import { createAssetImport, completeSourceUpload, loadAssetImport, saveImportMap
 import { readAssetWorkbook } from "../../../src/lib/spreadsheet/read-asset-workbook";
 import { actor, unitId } from "./fakes";
 import { fixture } from "./lifecycle-fixture";
+import { resumableFixture } from "./lifecycle-fixture";
 import { assetRow, headers } from "../../fixtures/asset-workbooks";
 import { createImportDependencies } from "../../../src/server/import/dependencies";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -63,6 +64,13 @@ describe("private import lifecycle", () => {
   });
   it("never submits before a finalized zero-error run", async () => {
     const f = await fixture(); await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" }); expect(f.events).not.toContain("submit");
+  });
+  it("reconstructs processing progress from the persisted manifest after reload", async () => {
+    const f = await resumableFixture(6_000); const claim = await f.deps.claimProcessing(actor.userId, f.claimInput);
+    f.tables.asset_import_chunks = [{ import_run_id: claim.run.id, unit_induk_id: unitId, chunk_index: 0, start_ordinal: 0, row_count: 2_000, rows_hash: "e".repeat(64), valuations_hash: "f".repeat(64) }];
+    const result = await loadAssetImport(actor, f.created.importId, f.deps);
+    expect(result).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 2_000, expectedRows: 6_000, completedChunks: 1, expectedChunks: 3, percent: 33 } });
+    expect(JSON.stringify(result)).not.toMatch(/lease|token/i);
   });
   it("signs only non-upsert private objects and verifies metadata before downloading", async () => {
     const signed = vi.fn(async (path: string) => ({ data: { path, token: "synthetic" }, error: null }));

@@ -109,6 +109,7 @@ describe("importProgress", () => {
     expect(importProgress(4_001, [])).toEqual({ completedRows: 0, expectedRows: 4_001, completedChunks: 0, expectedChunks: 3, percent: 0 });
     expect(importProgress(4_001, [{ chunkIndex: 0, rowCount: 2_000 }, { chunkIndex: 2, rowCount: 1 }])).toEqual({ completedRows: 2_001, expectedRows: 4_001, completedChunks: 2, expectedChunks: 3, percent: 50 });
     expect(importProgress(4_001, [{ chunkIndex: 0, rowCount: 2_000 }, { chunkIndex: 1, rowCount: 2_000 }, { chunkIndex: 2, rowCount: 1 }])).toEqual({ completedRows: 4_001, expectedRows: 4_001, completedChunks: 3, expectedChunks: 3, percent: 100 });
+    expect(importProgress(4_001, [{ chunkIndex: 0, rowCount: 2_000 }, { chunkIndex: 1, rowCount: 2_000 }]).percent).toBe(99);
     expect(importProgress(0, [])).toEqual({ completedRows: 0, expectedRows: 0, completedChunks: 0, expectedChunks: 0, percent: 100 });
   });
 

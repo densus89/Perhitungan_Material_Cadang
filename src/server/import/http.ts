@@ -44,8 +44,8 @@ export async function assetImportMutation<T>(request: Request, schema: z.ZodType
       const unitId = z.object({ unitId: z.uuid() }).parse(parsed.data).unitId;
       if (!context.actor.unitIndukIds.includes(unitId)) return denied("FORBIDDEN", 403);
     }
-    const result = await handler(context.actor, parsed.data, createImportDependencies(createAdminSupabaseClient()));
-    return json(importResponseSchema.parse(result));
+    const result = importResponseSchema.parse(await handler(context.actor, parsed.data, createImportDependencies(createAdminSupabaseClient())));
+    return json(result, result.stage === "PROCESSING" ? 202 : 200);
   } catch (error) { return failure(error); }
 }
 export async function assetImportRead(importId: string, handler: (actor: Actor, importId: string, deps: ImportDependencies) => Promise<unknown>) {

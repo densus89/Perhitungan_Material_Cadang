@@ -5,11 +5,12 @@ import type { Database, Json } from "../../lib/supabase/database";
 import type { Actor } from "../../domain/access";
 import { importReviewSchema, stageSchema, type ImportDraft, type ImportReview, type ImportReviewQuery } from "../../domain/asset-import/schemas";
 import type { ImportDependencies } from "./dependencies";
+import { importProgress } from "./resumable";
 
 /** RLS session read; no upload signatures, object paths or privileged client cross this boundary. */
 export async function loadImportDrafts(client: SupabaseClient<Database>, actor: Actor): Promise<ImportDraft[]> {
   if (actor.role !== "UNIT_OPERATOR" || !actor.unitIndukIds.length) return [];
-  const { data, error } = await client.from("import_sessions").select("id,unit_induk_id,dataset_id,dataset_version_id,created_at,source_files(original_name),dataset_versions(status),asset_import_runs!asset_import_runs_import_session_id_unit_induk_id_dataset__fkey(status,expected_row_count,created_at),import_sheets(selected)")
+  const { data, error } = await client.from("import_sessions").select("id,unit_induk_id,dataset_id,dataset_version_id,created_at,source_files(original_name),dataset_versions(status),asset_import_runs!asset_import_runs_import_session_id_unit_induk_id_dataset__fkey(status,expected_row_count,created_at,asset_import_chunks(chunk_index,row_count)),import_sheets(selected)")
     .in("unit_induk_id", [...actor.unitIndukIds]).order("created_at", { ascending: false })
     .order("created_at", { referencedTable: "asset_import_runs", ascending: false }).limit(1, { referencedTable: "asset_import_runs" })
     .order("selected", { referencedTable: "import_sheets", ascending: false }).limit(1, { referencedTable: "import_sheets" }).limit(50);
@@ -19,7 +20,8 @@ export async function loadImportDrafts(client: SupabaseClient<Database>, actor: 
     const versionStage = stageSchema.safeParse(row.dataset_versions?.status);
     const terminal = versionStage.success && ["PENDING_RST", "ACTIVE", "HISTORICAL", "NEEDS_FIX"].includes(versionStage.data);
     const stage = terminal && versionStage.success ? versionStage.data : latest?.status === "PROCESSING" ? "PROCESSING" : latest?.status === "FAILED" ? "FAILED" : versionStage.success ? versionStage.data : row.import_sheets.some(sheet => sheet.selected) ? "READY_TO_PROCESS" : row.import_sheets.length ? "MAPPING" : "UPLOAD";
-    return { importId: row.id, unitId: row.unit_induk_id, datasetId: row.dataset_id, versionId: row.dataset_version_id, fileName: row.source_files?.original_name ?? "Snapshot XLSX", createdAt: row.created_at, stage, rowCount: latest?.expected_row_count ?? null };
+    const progress = latest?.status === "PROCESSING" ? importProgress(latest.expected_row_count, latest.asset_import_chunks.map(chunk => ({ chunkIndex: chunk.chunk_index, rowCount: chunk.row_count }))) : undefined;
+    return { importId: row.id, unitId: row.unit_induk_id, datasetId: row.dataset_id, versionId: row.dataset_version_id, fileName: row.source_files?.original_name ?? "Snapshot XLSX", createdAt: row.created_at, stage, rowCount: latest?.expected_row_count ?? null, ...(progress ? { progress } : {}) };
   });
 }
 const object = (value: Json | undefined) => value && typeof value === "object" && !Array.isArray(value) ? value : {};

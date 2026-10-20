@@ -10,6 +10,7 @@ import type { Json } from "../../lib/supabase/database";
 import type { ImportDependencies, Row } from "./dependencies";
 import { loadImportReview, loadImportComparison } from "./workspace";
 import type { ImportReviewQuery } from "../../domain/asset-import/schemas";
+import { importProgress } from "./resumable";
 
 export class ImportError extends Error {
   constructor(readonly code: "FORBIDDEN" | "NOT_FOUND" | "INVALID_INPUT" | "SOURCE_MISMATCH" | "NOT_READY" | "PREVIEW_MISMATCH" | "PROCESS_FAILED" | "CONFLICT" | "REFERENCE_UNAVAILABLE" | "COMPARISON_FAILED", readonly status = 409) { super(code); }
@@ -135,6 +136,8 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
   const summary = importSummarySchema.safeParse(metadata?.summary); if (summary.success && currentMatches) { result.summary = summary.data; if (summary.data.blockingErrors && stage === "READY_TO_SUBMIT") result.stage = "NEEDS_FIX"; }
   if (currentMatches && !metadata?.comparison_ready && stage === "READY_TO_SUBMIT") { result.stage = "FAILED"; result.failureCode = "COMPARISON_FAILED"; }
   if (latest?.status === "FAILED") result.failureCode = "PROCESS_FAILED";
+  const processing = runs.find((run) => run.status === "PROCESSING");
+  if (result.stage === "PROCESSING" && processing) result.progress = importProgress(processing.expected_row_count, await deps.completedChunks(processing.id));
   if (currentMatches && current) {
     result.review = await loadImportReview(session.unit_induk_id, current.id, deps, options);
     result.comparison = await loadImportComparison(session.unit_induk_id, current.id, Boolean(metadata?.comparison_base_version_id), deps, result.summary?.rowCount ?? current.expected_row_count);
