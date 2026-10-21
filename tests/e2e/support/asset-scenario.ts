@@ -151,7 +151,6 @@ async function waitForProcessResult(page: Page, scenario: AssetScenario, action:
     })();
   };
   page.on("request", onRequest); page.on("response", onResponse);
-  armResponseTimeout();
   try { await action(); return await result; }
   finally { if (timeout) clearTimeout(timeout); page.off("request", onRequest); page.off("response", onResponse); }
 }
