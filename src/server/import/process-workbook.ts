@@ -12,7 +12,7 @@ import { compareAssetVersions } from "./compare-asset-versions";
 import type { UsefulLifeRule, UsefulLifeAlias } from "../../reference/useful-life-perdir-0299";
 import type { ImportDependencies, Row } from "./dependencies";
 import { ownedImport, assertEditable, verifiedBytes, confirmedMapping, ImportError, sha256, asJson, loadAssetImport } from "./service";
-import { ASSET_CHUNK_SIZE, deterministicAssetRowId, planMissingChunks } from "./resumable";
+import { ASSET_CHUNK_SIZE, deterministicAssetRowId, importProgress, planMissingChunks } from "./resumable";
 
 /** PostgreSQL jsonb sorts keys by UTF-8 byte length, then byte value, and expands exponents. */
 export function postgresJsonb(value: unknown): string {
@@ -146,18 +146,46 @@ async function persistComparison(actor: Actor, session: Row<"import_sessions">, 
 export async function processStoredWorkbook(actor: Actor, importId: string, deps: ImportDependencies): Promise<ImportResponse> {
   const processStarted = performance.now();
   const phase = (name: string, rows?: number) => console.info("ASSET_IMPORT_PHASE " + JSON.stringify({ name, durationMs: Math.round(performance.now() - processStarted), ...(rows === undefined ? {} : { rows }) }));
-  const { session, source, version } = await ownedImport(actor, importId, deps); assertEditable(version);
+  const { session, source, version, dataset } = await ownedImport(actor, importId, deps); assertEditable(version);
   const sheet = (await deps.list("import_sheets", { import_session_id: session.id, unit_induk_id: session.unit_induk_id, selected: true }))[0];
   if (!sheet) throw new ImportError("NOT_READY");
   const mapping = await confirmedMapping(sheet, deps);
   const diagnostics = z.object({ ruleVersion: z.string().min(1), canonicalHash: hashSchema, layoutHash: hashSchema, uploadVerified: hashSchema }).safeParse(sheet.diagnostics);
   if (!diagnostics.success || diagnostics.data.uploadVerified !== source.sha256) throw new ImportError("NOT_READY");
+  const processing = await deps.processingRun(session.id);
+  if (processing) {
+    const completed = await deps.completedChunks(processing.id), expectedChunks = Math.ceil(processing.expected_row_count / ASSET_CHUNK_SIZE);
+    const manifestComplete = completed.length === expectedChunks && completed.every((chunk, index) => chunk.chunkIndex === index && chunk.rowCount === Math.min(ASSET_CHUNK_SIZE, processing.expected_row_count - index * ASSET_CHUNK_SIZE));
+    if (completed.length >= expectedChunks && (!manifestComplete || completed.reduce((total, chunk) => total + chunk.rowCount, 0) !== processing.expected_row_count || processing.expected_row_count !== processing.expected_valuation_count)) throw new ImportError("PROCESS_FAILED");
+    if (manifestComplete) {
+      if (processing.processing_protocol_version !== "resumable-v1" || processing.mapping_revision !== session.mapping_revision || processing.source_hash !== source.sha256 || processing.mapping_hash !== diagnostics.data.layoutHash || processing.mapping_hash !== sheet.layout_hash || processing.rule_version !== diagnostics.data.ruleVersion) throw new ImportError("CONFLICT");
+      await verifiedBytes(source, deps);
+      const runEvidence = { id: processing.id, expected_row_count: processing.expected_row_count, expected_valuation_count: processing.expected_valuation_count, source_hash: processing.source_hash, mapping_hash: processing.mapping_hash, rule_version: processing.rule_version, expected_rows_hash: processing.expected_rows_hash, expected_valuations_hash: processing.expected_valuations_hash };
+      let claim;
+      try { claim = await deps.claimProcessing(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: runEvidence }); }
+      catch { throw new ImportError("CONFLICT"); }
+      phase("claimed", processing.expected_row_count);
+      try {
+        await deps.finalize(actor.userId, processing.id, claim.leaseToken);
+        phase("finalized", processing.expected_row_count);
+        try { await deps.releaseProcessing(actor.userId, processing.id, claim.leaseToken); } catch { /* terminal run no longer needs the lease */ }
+      } catch {
+        try { await deps.releaseProcessing(actor.userId, processing.id, claim.leaseToken); } catch { /* lease expiry permits a later retry */ }
+        throw new ImportError("PROCESS_FAILED");
+      }
+      if (!dataset.active_version_id) {
+        try { await deps.sealComparison(actor.userId, processing.id, null, null); phase("compared", processing.expected_row_count); }
+        catch { throw new ImportError("COMPARISON_FAILED"); }
+        return loadAssetImport(actor, importId, deps);
+      }
+      return { importId, datasetId: session.dataset_id, versionId: version.id, stage: "PROCESSING", source: { unitId: session.unit_induk_id, fileName: source.original_name, byteSize: source.byte_size, sha256: source.sha256 }, ruleVersion: diagnostics.data.ruleVersion, layout: mapping, progress: importProgress(processing.expected_row_count, completed) };
+    }
+  }
   const bytes = await verifiedBytes(source, deps);
   const parsed = await readAssetWorkbook(bytes, { ruleVersion: diagnostics.data.ruleVersion, confirmedMapping: mapping, collectRows: true, previewLimit: 0, batchSize: 1000 });
   phase("parsed", parsed.rows?.length);
   if (parsed.canonicalHash !== diagnostics.data.canonicalHash || parsed.layoutHash !== diagnostics.data.layoutHash || parsed.layoutHash !== sheet.layout_hash) throw new ImportError("PREVIEW_MISMATCH");
   if (!parsed.rows?.length) throw new ImportError("NOT_READY");
-  const processing = await deps.processingRun(session.id);
   const current = session.current_run_id ? (await deps.list("asset_import_runs", { id: session.current_run_id }))[0] : undefined;
   const currentMetadata = current ? (await deps.list("asset_import_run_metadata", { import_run_id: current.id, unit_induk_id: session.unit_induk_id }))[0] : undefined;
   const comparisonRetry = !processing && current?.status === "COMPLETE" && current.mapping_revision === session.mapping_revision && current.mapping_hash === parsed.layoutHash && current.rule_version === diagnostics.data.ruleVersion && currentMetadata && !currentMetadata.comparison_ready ? current : undefined;
@@ -209,6 +237,11 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
       phase("committed", chunks.reduce((total, chunk) => total + chunk.rowCount, 0));
       const completed = await deps.completedChunks(runId);
       if (completed.length < Math.ceil(rows.length / ASSET_CHUNK_SIZE)) {
+        await deps.releaseProcessing(actor.userId, runId, claim.leaseToken);
+        phase("partial", completed.reduce((total, chunk) => total + chunk.rowCount, 0));
+        return loadAssetImport(actor, importId, deps);
+      }
+      if (processing) {
         await deps.releaseProcessing(actor.userId, runId, claim.leaseToken);
         phase("partial", completed.reduce((total, chunk) => total + chunk.rowCount, 0));
         return loadAssetImport(actor, importId, deps);

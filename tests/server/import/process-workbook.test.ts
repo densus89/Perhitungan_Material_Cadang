@@ -70,10 +70,16 @@ describe("authoritative workbook processing", () => {
     expect(f.tables.asset_snapshot_rows).toHaveLength(24_000);
     const runId = String(f.tables.asset_import_runs[0].id), firstId = String(f.tables.asset_snapshot_rows[0].id);
     const second = await processStoredWorkbook(actor, f.created.importId, f.deps);
-    expect(second.stage).toBe("READY_TO_SUBMIT");
+    expect(second.stage).toBe("PROCESSING");
     expect(f.tables.asset_import_runs).toHaveLength(1);
     expect(f.tables.asset_import_chunks).toHaveLength(13);
     expect(f.tables.asset_snapshot_rows).toHaveLength(24_001);
+    expect(f.tables.asset_import_runs[0].status).toBe("PROCESSING");
+    expect(f.tables.import_sessions[0].current_run_id ?? null).toBeNull();
+    const insertsBeforeFinalize = f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:") || event.startsWith("insert:asset_valuations:")).length;
+    const third = await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(third.stage).toBe("READY_TO_SUBMIT");
+    expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:") || event.startsWith("insert:asset_valuations:")).length).toBe(insertsBeforeFinalize);
     expect(f.tables.asset_import_runs[0].id).toBe(runId);
     expect(f.tables.asset_snapshot_rows[0].id).toBe(firstId);
   }, 180_000);
@@ -96,6 +102,7 @@ describe("authoritative workbook processing", () => {
     const runId = f.tables.asset_import_runs[0].id;
     await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "CONFLICT" });
     f.advance(241_000); f.deps.commitChunk = commit; f.deps.releaseProcessing = release;
+    await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).resolves.toMatchObject({ stage: "PROCESSING" });
     await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).resolves.toMatchObject({ stage: "READY_TO_SUBMIT" });
     expect(f.tables.asset_import_runs).toHaveLength(1); expect(f.tables.asset_import_runs[0].id).toBe(runId);
   });
@@ -121,7 +128,8 @@ describe("authoritative workbook processing", () => {
     expect(f.tables.asset_import_runs[1]).toMatchObject({ status: "PROCESSING", failure_code: null }); expect(f.tables.import_sessions[0].current_run_id).toBe(prior);
     expect((await loadAssetImport(actor, f.created.importId, f.deps)).stage).toBe("PROCESSING");
     const retryRun = f.tables.asset_import_runs[1].id;
-    f.fail(""); await processStoredWorkbook(actor, f.created.importId, f.deps); expect(f.tables.import_sessions[0].current_run_id).toBe(retryRun); expect(f.tables.asset_import_runs).toHaveLength(2);
+    f.fail(""); await expect(processStoredWorkbook(actor, f.created.importId, f.deps)).resolves.toMatchObject({ stage: "PROCESSING" });
+    await processStoredWorkbook(actor, f.created.importId, f.deps); expect(f.tables.import_sessions[0].current_run_id).toBe(retryRun); expect(f.tables.asset_import_runs).toHaveLength(2);
   });
   it("compares active rows only after finalization and retains the active pointer on submit", async () => {
     const f = await prepared(); await processStoredWorkbook(actor, f.created.importId, f.deps);

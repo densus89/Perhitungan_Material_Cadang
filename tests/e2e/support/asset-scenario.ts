@@ -93,7 +93,17 @@ export async function cleanupAssetScenario(scenario: AssetScenario, options: { t
       `delete from public.datasets where unit_induk_id in (${ids});`, `delete from public.user_unit_assignments where unit_induk_id in (${ids});`, `delete from public.unit_induk where id in (${ids});`, "commit;"].join("\n");
     const path = join(directory, "cleanup.sql"); await writeFile(path, sql);
     const result = spawnSync(process.execPath, [resolve("node_modules/supabase/dist/supabase.js"), "db", "query", "--linked", "--file", path, "--output", "json", "--agent", "no"], { encoding: "utf8", timeout: options.timeoutMs ?? 120000 });
-    if (result.status !== 0) throw new Error(`Synthetic asset cleanup failed for run ${runId}; exact resources retained for recovery`);
+    if (result.status !== 0) {
+      const accessToken = process.env.SUPABASE_ACCESS_TOKEN;
+      const projectRef = new URL(parseE2eEnvironment(process.env).supabaseUrl).hostname.split(".")[0];
+      if (!accessToken || !/^[a-z0-9]{20}$/.test(projectRef)) throw new Error(`Synthetic asset cleanup failed for run ${runId}; exact resources retained for recovery`);
+      const fallback = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ query: sql }),
+      });
+      if (!fallback.ok) throw new Error(`Synthetic asset cleanup failed for run ${runId}; exact resources retained for recovery`);
+    }
     const remainingChunks = await client.from("asset_import_chunks").select("import_run_id", { count: "exact", head: true }).in("completed_by", users.map(user => user.id));
     requireE2eSuccess(remainingChunks, "isolated manifest cleanup proof");
     if (remainingChunks.count !== 0) throw new Error("Synthetic manifest cleanup incomplete");
@@ -117,8 +127,17 @@ async function waitForProcessResult(page: Page, scenario: AssetScenario, action:
   const starts = new Map<Request, number>();
   let settle: ((result: ImportResponse) => void) | undefined;
   let rejectResult: ((error: Error) => void) | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   const result = new Promise<ImportResponse>((resolveResult, reject) => { settle = resolveResult; rejectResult = reject; });
-  const onRequest = (request: Request) => { if (isProcessRequest(request)) starts.set(request, Date.now()); };
+  const armResponseTimeout = () => {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => rejectResult?.(new Error("Synthetic processing did not reach the next response")), options.processTimeoutMs ?? 300000);
+  };
+  const onRequest = (request: Request) => {
+    if (!isProcessRequest(request)) return;
+    starts.set(request, Date.now());
+    armResponseTimeout();
+  };
   const onResponse = (response: Response) => {
     if (!isProcessRequest(response.request())) return;
     void (async () => {
@@ -127,14 +146,14 @@ async function waitForProcessResult(page: Page, scenario: AssetScenario, action:
         const observation = { status: response.status(), durationMs: Date.now() - (starts.get(response.request()) ?? Date.now()), body };
         scenario.processResponses.push(observation); scenario.processDurationsMs.push(observation.durationMs);
         if (![200, 202].includes(observation.status)) throw new Error(`Synthetic processing failed with HTTP ${observation.status}`);
-        if (body.stage !== "PROCESSING") settle?.(body);
+        if (body.stage !== "PROCESSING") settle?.(body); else armResponseTimeout();
       } catch (error) { rejectResult?.(error instanceof Error ? error : new Error("Synthetic process response was invalid")); }
     })();
   };
   page.on("request", onRequest); page.on("response", onResponse);
-  const timeout = setTimeout(() => rejectResult?.(new Error("Synthetic processing did not reach a final response")), options.processTimeoutMs ?? 300000);
+  armResponseTimeout();
   try { await action(); return await result; }
-  finally { clearTimeout(timeout); page.off("request", onRequest); page.off("response", onResponse); }
+  finally { if (timeout) clearTimeout(timeout); page.off("request", onRequest); page.off("response", onResponse); }
 }
 async function startAssetWorkbookInput(page: Page, input: AssetWorkbookInput, options: UploadOptions = {}) {
   const uploadExpect = baseExpect.configure({ timeout: options.previewTimeoutMs ?? 30000 });

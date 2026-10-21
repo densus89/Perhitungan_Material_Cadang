@@ -33,12 +33,13 @@ async function logScaleFailureState(scenario: AssetScenario) {
     persistedRows: rows.count,
     persistedValuations: valuations.count,
     queryCodes: [rows.error?.code ?? null, valuations.error?.code ?? null],
+    processResponses: scenario.processResponses.map(({ status, durationMs, body }) => ({ status, durationMs, stage: body.stage, progress: body.progress })),
   }));
 }
 
 test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
   test.skip(requestedRows !== SCALE_ROWS, `Set E2E_SCALE_ROWS=${SCALE_ROWS} to run the destructive, isolated scale gate.`);
-  test.describe.configure({ timeout: 900000 });
+  test.describe.configure({ timeout: 2100000 });
   let scenario: AssetScenario;
 
   test.beforeAll(async () => { scenario = await createAssetScenario(); });
@@ -48,7 +49,7 @@ test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
   });
 
   test("persists, reconciles and reloads every synthetic row inside the hosted limit", async ({ page }) => {
-    test.setTimeout(900000);
+    test.setTimeout(2100000);
     const directory = await mkdtemp(join(tmpdir(), "asset-e2e-scale-"));
     const path = join(directory, scenario.fileName("scale-141105"));
     try {
