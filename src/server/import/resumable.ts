@@ -2,7 +2,10 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 export const ASSET_CHUNK_SIZE = 2_000;
-export const REQUEST_CHUNK_LIMIT = 8;
+// Chunk RPCs have a 60-second database timeout and run two at a time. Four
+// chunks cap the database portion at two waves, leaving ample room beneath the
+// 300-second hosted-function limit for full workbook parsing and response work.
+export const REQUEST_CHUNK_LIMIT = 4;
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const rowHashExcluded = ["created_at"] as const;

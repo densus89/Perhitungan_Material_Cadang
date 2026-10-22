@@ -118,7 +118,7 @@ test.describe.serial("private, versioned synthetic asset import", () => {
       await startAssetWorkbookPath(page, path, { previewTimeoutMs: 300000 });
       await expect.poll(() => Boolean(lostResponse), { timeout: 300000 }).toBe(true);
       await expect(page.getByText(/Respons terputus.*Status tersimpan diperiksa/)).toBeVisible();
-      expect(lostResponse).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 16_000, expectedRows: rowCount } });
+      expect(lostResponse).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 8_000, expectedRows: rowCount } });
       expect(scenario.processResponses.at(-1)?.durationMs).toBeLessThan(240000);
       await expect(page.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "16000");
 

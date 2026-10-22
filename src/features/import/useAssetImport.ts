@@ -11,7 +11,7 @@ export type LocalPreview = Extract<AssetImportWorkerResult, { type: "result" }>;
 export type ImportUnit = { id: string; name: string };
 export type ImportStep = "source" | "mapping" | "quality" | "comparison";
 type PreviewSnapshot = { preview: LocalPreview; mapping: AssetSheetMapping | null; file: File; generation: number };
-const PROCESS_CHUNKS_PER_REQUEST = 8;
+const PROCESS_CHUNKS_PER_REQUEST = 4;
 function stepFor(response: ImportResponse): ImportStep {
   if (["PENDING_RST", "ACTIVE", "HISTORICAL"].includes(response.stage)) return "comparison";
   if (response.summary) return "quality";
