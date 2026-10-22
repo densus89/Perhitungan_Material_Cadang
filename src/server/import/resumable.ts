@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 export const ASSET_CHUNK_SIZE = 2_000;
-export const REQUEST_CHUNK_LIMIT = 12;
+export const REQUEST_CHUNK_LIMIT = 8;
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const rowHashExcluded = ["created_at"] as const;

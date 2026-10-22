@@ -11,6 +11,7 @@ export type LocalPreview = Extract<AssetImportWorkerResult, { type: "result" }>;
 export type ImportUnit = { id: string; name: string };
 export type ImportStep = "source" | "mapping" | "quality" | "comparison";
 type PreviewSnapshot = { preview: LocalPreview; mapping: AssetSheetMapping | null; file: File; generation: number };
+const PROCESS_CHUNKS_PER_REQUEST = 8;
 function stepFor(response: ImportResponse): ImportStep {
   if (["PENDING_RST", "ACTIVE", "HISTORICAL"].includes(response.stage)) return "comparison";
   if (response.summary) return "quality";
@@ -114,13 +115,13 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   }
   async function continueProcessing(importId: string, initial?: ImportResponse) {
     const generation = authorityGeneration.current;
-    let current = initial, attempts = 0, attemptLimit = initial?.progress ? Math.ceil(initial.progress.expectedChunks / 12) + 2 : 2;
+    let current = initial, attempts = 0, attemptLimit = initial?.progress ? Math.ceil(initial.progress.expectedChunks / PROCESS_CHUNKS_PER_REQUEST) + 2 : 2;
     while (!current || current.stage === "PROCESSING") {
       if (!mounted.current || authorityGeneration.current !== generation || attempts >= attemptLimit) break;
       current = await api.process(importId); attempts++;
       if (!mounted.current || authorityGeneration.current !== generation) break;
       remember(current); setStep(stepFor(current));
-      if (current.progress) attemptLimit = Math.ceil(current.progress.expectedChunks / 12) + 2;
+      if (current.progress) attemptLimit = Math.ceil(current.progress.expectedChunks / PROCESS_CHUNKS_PER_REQUEST) + 2;
     }
     if (!mounted.current || authorityGeneration.current !== generation) return current;
     if (current?.stage === "PROCESSING" && attempts >= attemptLimit) setMessage("Proses tersimpan belum selesai. Gunakan Lanjutkan proses untuk melanjutkan batch berikutnya.");

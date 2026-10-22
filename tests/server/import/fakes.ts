@@ -70,6 +70,9 @@ export function fakeDependencies() {
           last_progress_at: null,
           finalized_rows_hash: null,
           finalized_valuations_hash: null,
+          prepared_rows_hash: null,
+          prepared_valuations_hash: null,
+          prepared_summary: null,
           failure_code: null,
           completed_at: null,
           created_at: deps.now(),
@@ -126,6 +129,18 @@ export function fakeDependencies() {
       if (!bytes) throw new Error("Missing private storage object");
       return { bytes, size: bytes.length, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
     },
+    async prepareFinalization(actorId, runId, leaseToken, part) {
+      events.push(`prepare:${part}`);
+      const run = (tables.asset_import_runs ?? []).find((row) => row.id === runId);
+      if (!run || run.created_by !== actorId || run.status !== "PROCESSING" || !activeLease(run) || run.processing_lease_token !== leaseToken) throw new Error("Invalid processing lease");
+      const chunks = manifest(runId), expectedChunks = Math.ceil(Number(run.expected_row_count) / 2_000);
+      if (chunks.length !== expectedChunks) throw new Error("Incomplete chunk manifest");
+      if (part === "ROWS_HASH") run.prepared_rows_hash = run.expected_rows_hash;
+      else if (part === "VALUATIONS_HASH") run.prepared_valuations_hash = run.expected_valuations_hash;
+      else if (part === "SUMMARY") run.prepared_summary = { rowCount: run.expected_row_count };
+      else throw new Error("Invalid finalization part");
+      run.processing_lease_expires_at = new Date(nowMs + 240_000).toISOString();
+    },
     async finalize(actorId, runId, leaseToken) {
       events.push("finalize");
       const run = tables.asset_import_runs.find((row) => row.id === runId)!;
@@ -135,6 +150,7 @@ export function fakeDependencies() {
         if (!leaseToken || !activeLease(run) || run.processing_lease_token !== leaseToken) throw new Error("Invalid processing lease");
         const chunks = manifest(runId), expectedChunks = Math.ceil(Number(run.expected_row_count) / 2_000);
         if (chunks.length !== expectedChunks || chunks.some((entry, index) => Number(entry.chunk_index) !== index || Number(entry.start_ordinal) !== index * 2_000 || Number(entry.row_count) !== Math.min(2_000, Number(run.expected_row_count) - index * 2_000))) throw new Error("Incomplete chunk manifest");
+        if (!run.prepared_rows_hash || !run.prepared_valuations_hash || !run.prepared_summary) throw new Error("Prepared finalization evidence required");
       }
       if (run.mapping_revision !== session.mapping_revision || sheet.layout_hash !== run.mapping_hash) throw new Error("Stale finalization");
       const rows = tables.asset_snapshot_rows.filter((row) => row.import_run_id === runId), values = tables.asset_valuations.filter((row) => row.import_run_id === runId);

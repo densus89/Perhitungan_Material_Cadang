@@ -14,6 +14,12 @@ import type { ImportDependencies, Row } from "./dependencies";
 import { ownedImport, assertEditable, verifiedBytes, confirmedMapping, ImportError, sha256, asJson, loadAssetImport } from "./service";
 import { ASSET_CHUNK_SIZE, deterministicAssetRowId, importProgress, planMissingChunks } from "./resumable";
 
+async function prepareFinalization(actorId: string, runId: string, leaseToken: string, deps: ImportDependencies) {
+  await deps.prepareFinalization(actorId, runId, leaseToken, "ROWS_HASH");
+  await deps.prepareFinalization(actorId, runId, leaseToken, "VALUATIONS_HASH");
+  await deps.prepareFinalization(actorId, runId, leaseToken, "SUMMARY");
+}
+
 /** PostgreSQL jsonb sorts keys by UTF-8 byte length, then byte value, and expands exponents. */
 export function postgresJsonb(value: unknown): string {
   if (value === null) return "null";
@@ -159,13 +165,17 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
     if (completed.length >= expectedChunks && (!manifestComplete || completed.reduce((total, chunk) => total + chunk.rowCount, 0) !== processing.expected_row_count || processing.expected_row_count !== processing.expected_valuation_count)) throw new ImportError("PROCESS_FAILED");
     if (manifestComplete) {
       if (processing.processing_protocol_version !== "resumable-v1" || processing.mapping_revision !== session.mapping_revision || processing.source_hash !== source.sha256 || processing.mapping_hash !== diagnostics.data.layoutHash || processing.mapping_hash !== sheet.layout_hash || processing.rule_version !== diagnostics.data.ruleVersion) throw new ImportError("CONFLICT");
-      await verifiedBytes(source, deps);
+      // Every manifest chunk was derived only after full byte/hash verification.
+      // Finalization reuses that pinned evidence instead of downloading the same
+      // immutable source once more after the complete manifest is persisted.
       const runEvidence = { id: processing.id, expected_row_count: processing.expected_row_count, expected_valuation_count: processing.expected_valuation_count, source_hash: processing.source_hash, mapping_hash: processing.mapping_hash, rule_version: processing.rule_version, expected_rows_hash: processing.expected_rows_hash, expected_valuations_hash: processing.expected_valuations_hash };
       let claim;
       try { claim = await deps.claimProcessing(actor.userId, { importId: session.id, expectedRevision: session.mapping_revision, run: runEvidence }); }
       catch { throw new ImportError("CONFLICT"); }
       phase("claimed", processing.expected_row_count);
       try {
+        await prepareFinalization(actor.userId, processing.id, claim.leaseToken, deps);
+        phase("prepared", processing.expected_row_count);
         await deps.finalize(actor.userId, processing.id, claim.leaseToken);
         phase("finalized", processing.expected_row_count);
         try { await deps.releaseProcessing(actor.userId, processing.id, claim.leaseToken); } catch { /* terminal run no longer needs the lease */ }
@@ -246,6 +256,8 @@ export async function processStoredWorkbook(actor: Actor, importId: string, deps
         phase("partial", completed.reduce((total, chunk) => total + chunk.rowCount, 0));
         return loadAssetImport(actor, importId, deps);
       }
+      await prepareFinalization(actor.userId, runId, claim.leaseToken, deps);
+      phase("prepared", rows.length);
       await deps.finalize(actor.userId, runId, claim.leaseToken);
       phase("finalized", rows.length);
       try { await deps.releaseProcessing(actor.userId, runId, claim.leaseToken); } catch { /* terminal run no longer needs the lease */ }

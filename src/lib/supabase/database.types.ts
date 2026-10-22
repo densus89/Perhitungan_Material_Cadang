@@ -264,6 +264,9 @@ export type Database = {
           processing_lease_expires_at: string | null
           processing_lease_token: string | null
           processing_protocol_version: string
+          prepared_rows_hash: string | null
+          prepared_summary: Json | null
+          prepared_valuations_hash: string | null
           rule_version: string
           source_hash: string
           status: Database["public"]["Enums"]["asset_import_run_status"]
@@ -290,6 +293,9 @@ export type Database = {
           processing_lease_expires_at?: string | null
           processing_lease_token?: string | null
           processing_protocol_version?: string
+          prepared_rows_hash?: string | null
+          prepared_summary?: Json | null
+          prepared_valuations_hash?: string | null
           rule_version: string
           source_hash: string
           status?: Database["public"]["Enums"]["asset_import_run_status"]
@@ -316,6 +322,9 @@ export type Database = {
           processing_lease_expires_at?: string | null
           processing_lease_token?: string | null
           processing_protocol_version?: string
+          prepared_rows_hash?: string | null
+          prepared_summary?: Json | null
+          prepared_valuations_hash?: string | null
           rule_version?: string
           source_hash?: string
           status?: Database["public"]["Enums"]["asset_import_run_status"]
@@ -1463,6 +1472,15 @@ export type Database = {
         Returns: number
       }
       list_asset_version_reviews: { Args: { p_filters: Json }; Returns: Json }
+      prepare_asset_import_finalization: {
+        Args: {
+          p_actor_id: string
+          p_lease_token: string
+          p_part: string
+          p_run_id: string
+        }
+        Returns: string
+      }
       release_asset_import_processing: {
         Args: { p_actor_id: string; p_lease_token: string; p_run_id: string }
         Returns: string

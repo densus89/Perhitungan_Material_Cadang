@@ -73,12 +73,12 @@ describe("planMissingChunks", () => {
     expect(chunks.every((chunk) => chunk.rowsHash.length === 64 && chunk.valuationsHash.length === 64)).toBe(true);
   });
 
-  it("selects manifest holes in index order and returns at most twelve chunks", () => {
+  it("selects manifest holes in index order and caps a request at 16,000 rows", () => {
     const { rows, valuations } = records(ASSET_CHUNK_SIZE * 13 + 1);
     const chunks = planMissingChunks(rows, valuations, [0, 2]);
-    expect(REQUEST_CHUNK_LIMIT).toBe(12);
-    expect(chunks).toHaveLength(12);
-    expect(chunks.map((chunk) => chunk.chunkIndex)).toEqual([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(REQUEST_CHUNK_LIMIT).toBe(8);
+    expect(chunks).toHaveLength(8);
+    expect(chunks.map((chunk) => chunk.chunkIndex)).toEqual([1, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("pins replay hashes while ignoring only the approved audit fields", () => {

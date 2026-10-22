@@ -16,23 +16,44 @@ const requestedRows = Number(process.env.E2E_SCALE_ROWS ?? 0);
 
 async function logScaleFailureState(scenario: AssetScenario) {
   const runResult = await scenario.client.from("asset_import_runs")
-    .select("id,status,expected_row_count,expected_valuation_count,created_at")
+    .select("id,import_session_id,status,expected_row_count,expected_valuation_count,created_at,mapping_revision,source_hash,mapping_hash,rule_version,processing_protocol_version,processing_lease_expires_at,processing_attempts,prepared_rows_hash,prepared_valuations_hash,prepared_summary")
     .eq("unit_induk_id", scenario.unitId).order("created_at", { ascending: false }).limit(1).maybeSingle();
   const run = runResult.data;
   if (runResult.error || !run) {
     console.log(JSON.stringify({ scenario: "asset-import-scale-diagnostic", run: null, code: runResult.error?.code ?? "NO_RUN" }));
     return;
   }
-  const [rows, valuations] = await Promise.all([
+  const sessionResult = await scenario.client.from("import_sessions").select("mapping_revision,source_file_id").eq("id", run.import_session_id).single();
+  const [rows, valuations, sheetResult, sourceResult] = await Promise.all([
     scenario.client.from("asset_snapshot_rows").select("id", { count: "exact", head: true }).eq("import_run_id", run.id),
     scenario.client.from("asset_valuations").select("asset_row_id", { count: "exact", head: true }).eq("import_run_id", run.id),
+    scenario.client.from("import_sheets").select("layout_hash,diagnostics").eq("import_session_id", run.import_session_id).eq("selected", true).maybeSingle(),
+    sessionResult.data?.source_file_id
+      ? scenario.client.from("source_files").select("sha256").eq("id", sessionResult.data.source_file_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
+  const diagnostics = sheetResult.data?.diagnostics && typeof sheetResult.data.diagnostics === "object" && !Array.isArray(sheetResult.data.diagnostics)
+    ? sheetResult.data.diagnostics
+    : {};
+  const leaseAvailable = !run.processing_lease_expires_at || new Date(run.processing_lease_expires_at).getTime() <= Date.now();
   console.log(JSON.stringify({
     scenario: "asset-import-scale-diagnostic",
-    run: { status: run.status, expectedRows: run.expected_row_count, expectedValuations: run.expected_valuation_count },
+    run: { status: run.status, expectedRows: run.expected_row_count, expectedValuations: run.expected_valuation_count, processingAttempts: run.processing_attempts },
+    finalizationInvariants: {
+      protocol: run.processing_protocol_version === "resumable-v1",
+      mappingRevision: run.mapping_revision === sessionResult.data?.mapping_revision,
+      sourceHash: run.source_hash === sourceResult.data?.sha256,
+      diagnosticsLayout: run.mapping_hash === diagnostics.layoutHash,
+      selectedSheetLayout: run.mapping_hash === sheetResult.data?.layout_hash,
+      ruleVersion: run.rule_version === diagnostics.ruleVersion,
+      leaseAvailable,
+      preparedRowsHash: Boolean(run.prepared_rows_hash),
+      preparedValuationsHash: Boolean(run.prepared_valuations_hash),
+      preparedSummary: Boolean(run.prepared_summary),
+    },
     persistedRows: rows.count,
     persistedValuations: valuations.count,
-    queryCodes: [rows.error?.code ?? null, valuations.error?.code ?? null],
+    queryCodes: [sessionResult.error?.code ?? null, rows.error?.code ?? null, valuations.error?.code ?? null, sheetResult.error?.code ?? null, sourceResult.error?.code ?? null],
     processResponses: scenario.processResponses.map(({ status, durationMs, body }) => ({ status, durationMs, stage: body.stage, progress: body.progress })),
   }));
 }
@@ -60,7 +81,7 @@ test.describe.serial("hosted 141105-row asset snapshot acceptance", () => {
       await page.goto("/impor/");
       let result;
       try {
-        result = await uploadAssetWorkbookPath(page, scenario, path, { previewTimeoutMs: 300000, processTimeoutMs: 300000 });
+        result = await uploadAssetWorkbookPath(page, scenario, path, { previewTimeoutMs: 300000, processTimeoutMs: 300000, startTimeoutMs: 900000 });
       } catch (error) {
         await logScaleFailureState(scenario);
         throw error;

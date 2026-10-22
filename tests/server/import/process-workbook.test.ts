@@ -60,14 +60,14 @@ describe("authoritative workbook processing", () => {
     expect(maximum).toBe(2);
     expect(sizes).toEqual([2000, 2000, 2000, 501]);
   });
-  it("resumes a 24001-row import in the same run with deterministic row identities", async () => {
+  it("resumes a 24001-row import and finalizes its complete manifest without another source download", async () => {
     const f = await prepared(Array.from({ length: 24_001 }, (_, index) => assetRow.map((value, column) => column === 4 ? String(index).padStart(6, "0") : value)));
     const first = await processStoredWorkbook(actor, f.created.importId, f.deps);
     expect(first.stage).toBe("PROCESSING");
     await expect(submitAssetVersion(actor, f.created.importId, f.deps)).rejects.toMatchObject({ code: "NOT_READY" });
     expect(f.tables.asset_import_runs).toHaveLength(1);
-    expect(f.tables.asset_import_chunks).toHaveLength(12);
-    expect(f.tables.asset_snapshot_rows).toHaveLength(24_000);
+    expect(f.tables.asset_import_chunks).toHaveLength(8);
+    expect(f.tables.asset_snapshot_rows).toHaveLength(16_000);
     const runId = String(f.tables.asset_import_runs[0].id), firstId = String(f.tables.asset_snapshot_rows[0].id);
     const second = await processStoredWorkbook(actor, f.created.importId, f.deps);
     expect(second.stage).toBe("PROCESSING");
@@ -77,6 +77,7 @@ describe("authoritative workbook processing", () => {
     expect(f.tables.asset_import_runs[0].status).toBe("PROCESSING");
     expect(f.tables.import_sessions[0].current_run_id ?? null).toBeNull();
     const insertsBeforeFinalize = f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:") || event.startsWith("insert:asset_valuations:")).length;
+    f.deps.download = async () => { throw new Error("synthetic storage interruption after complete manifest"); };
     const third = await processStoredWorkbook(actor, f.created.importId, f.deps);
     expect(third.stage).toBe("READY_TO_SUBMIT");
     expect(f.events.filter((event) => event.startsWith("insert:asset_snapshot_rows:") || event.startsWith("insert:asset_valuations:")).length).toBe(insertsBeforeFinalize);
@@ -116,6 +117,16 @@ describe("authoritative workbook processing", () => {
     expect(f.events.indexOf("finalize")).toBeGreaterThan(f.events.indexOf("insert:asset_valuations:1"));
     expect(result.summary).toMatchObject({ rowCount: 1, blockingErrors: 0, valueSources: { SAP_BOOK_VALUE: 1 }, totalNilaiABC: 0 });
     expect((await submitAssetVersion(actor, f.created.importId, f.deps)).stage).toBe("PENDING_RST"); expect(f.tables.datasets[0].active_version_id ?? null).toBeNull();
+  });
+  it("prepares bounded persisted evidence before finalizing a complete manifest", async () => {
+    const f = await prepared();
+    await processStoredWorkbook(actor, f.created.importId, f.deps);
+    expect(f.events.filter((event) => event.startsWith("prepare:") || event === "finalize")).toEqual([
+      "prepare:ROWS_HASH",
+      "prepare:VALUATIONS_HASH",
+      "prepare:SUMMARY",
+      "finalize",
+    ]);
   });
   it("rejects changed stored bytes and browser canonical mismatch before batch insertion", async () => {
     const f = await prepared(); f.tables.import_sheets[0].diagnostics = { ...(f.tables.import_sheets[0].diagnostics as object), canonicalHash: "f".repeat(64) };

@@ -36,7 +36,10 @@ test.describe.serial("private, versioned synthetic asset import", () => {
   test.describe.configure({ timeout: 600000 });
   let scenario: AssetScenario;
   test.beforeAll(async () => { scenario = await createAssetScenario(); });
-  test.afterAll(async () => { if (scenario) await cleanupAssetScenario(scenario); });
+  test.afterAll(async ({}, testInfo) => {
+    testInfo.setTimeout(600000);
+    if (scenario) await cleanupAssetScenario(scenario, { timeoutMs: 600000 });
+  });
   test("operator template, error correction, resume, return/resubmit, approval, history and cross-unit denial", async ({ page, browser }) => {
     test.setTimeout(600000);
     await loginAssetActor(page, scenario, "operator");
@@ -115,9 +118,9 @@ test.describe.serial("private, versioned synthetic asset import", () => {
       await startAssetWorkbookPath(page, path, { previewTimeoutMs: 300000 });
       await expect.poll(() => Boolean(lostResponse), { timeout: 300000 }).toBe(true);
       await expect(page.getByText(/Respons terputus.*Status tersimpan diperiksa/)).toBeVisible();
-      expect(lostResponse).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 24_000, expectedRows: rowCount } });
+      expect(lostResponse).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 16_000, expectedRows: rowCount } });
       expect(scenario.processResponses.at(-1)?.durationMs).toBeLessThan(240000);
-      await expect(page.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "24000");
+      await expect(page.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "16000");
 
       await page.reload();
       await page.getByRole("button", { name: `Lanjutkan ${scenario.fileName("lost-response")}` }).click();

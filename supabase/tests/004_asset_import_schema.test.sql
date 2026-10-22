@@ -23,6 +23,8 @@ select fk_ok('public','asset_import_chunks','completed_by','public','profiles','
 select has_function('public','claim_asset_import_processing',array['uuid','uuid','uuid','jsonb','uuid'],'Claim or renew a bounded lease');
 select has_function('public','commit_asset_import_chunk',array['uuid','uuid','uuid','integer','integer','jsonb','jsonb','text','text'],'Atomic paired chunk commit');
 select has_function('public','release_asset_import_processing',array['uuid','uuid','uuid'],'Release own lease');
+select extensions.ok((select p.prosecdef and p.proconfig @> array['search_path=""'] from pg_proc p where p.oid='private.asset_run_hashes(uuid)'::regprocedure),'Hash wrapper executes controlled private helpers with an empty definer search path');
+select extensions.ok(not has_function_privilege('service_role','private.asset_run_rows_hash(uuid)','EXECUTE') and not has_function_privilege('service_role','private.asset_run_valuations_hash(uuid)','EXECUTE'),'Service role cannot invoke split hash helpers directly');
 select is((select p.prorettype::regtype::text from pg_proc p where p.oid=to_regprocedure(signature)),result_type,'RPC return contract: '||signature)
  from(values('public.claim_asset_import_processing(uuid,uuid,uuid,jsonb,uuid)','jsonb'),('public.commit_asset_import_chunk(uuid,uuid,uuid,integer,integer,jsonb,jsonb,text,text)','integer'),('public.release_asset_import_processing(uuid,uuid,uuid)','uuid')) contract(signature,result_type);
 

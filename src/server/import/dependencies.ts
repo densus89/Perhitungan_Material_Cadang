@@ -17,6 +17,7 @@ export interface ProcessingReservation { importId: string; expectedRevision: str
 export interface ProcessingClaimInput extends ProcessingReservation { leaseToken?: string }
 export type ProcessingRun = Omit<Row<"asset_import_runs">, "processing_lease_token">;
 export interface ProcessingClaim { run: ProcessingRun; leaseToken: string; completedChunks: CompletedAssetChunk[] }
+export type FinalizationPart = "ROWS_HASH" | "VALUATIONS_HASH" | "SUMMARY";
 export interface ExpectedSubmission { runId: string; mappingRevision: string; layoutHash: string; baseVersionId: string | null; comparisonId: string | null }
 export interface ImportDependencies {
   reviewPage(unitId: string, runId: string, options: ImportReviewQuery): Promise<{ rows: ReviewPageRow[]; totalRows: number }>;
@@ -36,6 +37,7 @@ export interface ImportDependencies {
   remove<T extends ImportTable>(table: T, filters: Partial<Row<T>>): Promise<void>;
   sign(path: string): Promise<{ path: string; token: string }>;
   download(path: string): Promise<{ bytes: Uint8Array; size: number; mimeType: string }>;
+  prepareFinalization(actorId: string, runId: string, leaseToken: string, part: FinalizationPart): Promise<void>;
   finalize(actorId: string, runId: string, leaseToken?: string): Promise<void>;
   replaceMapping(actorId: string, input: MappingReplacement): Promise<void>;
   reserve(actorId: string, input: ProcessingReservation): Promise<void>;
@@ -236,9 +238,17 @@ export function createImportDependencies(client: SupabaseClient<Database>): Impo
       if (!data || data.size !== size) throw new Error("Incomplete stored workbook");
       return { bytes: new Uint8Array(await data.arrayBuffer()), size, mimeType };
     },
+    async prepareFinalization(actorId, runId, leaseToken, part) {
+      const { data, error } = await client.rpc("prepare_asset_import_finalization", { p_actor_id: actorId, p_run_id: runId, p_lease_token: leaseToken, p_part: part });
+      if (error || data !== runId) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "prepareFinalization", part, code: error?.code ?? "RESULT_MISMATCH" }));
+      check(error);
+      if (data !== runId) throw new Error("Incomplete finalization preparation");
+    },
     async finalize(actorId, runId, leaseToken) {
       const args = leaseToken ? { p_actor_id: actorId, p_run_id: runId, p_lease_token: leaseToken } : { p_actor_id: actorId, p_run_id: runId };
-      const { error } = await client.rpc("finalize_asset_import_run", args); check(error);
+      const { error } = await client.rpc("finalize_asset_import_run", args);
+      if (error) console.warn("ASSET_IMPORT_PERSISTENCE " + JSON.stringify({ operation: "finalize", code: error.code ?? "UNKNOWN" }));
+      check(error);
     },
     async replaceMapping(actorId, input) { const { error } = await client.rpc("replace_asset_import_mapping", { p_actor_id: actorId, p_import_id: input.importId, p_sheet_id: input.sheetId, p_expected_revision: input.expectedRevision, p_mapping: input.mapping as unknown as Json, p_layout_hash: input.layoutHash, p_canonical_hash: input.canonicalHash, p_rule_version: input.ruleVersion, p_source_hash: input.sourceHash }); check(error); },
     async reserve(actorId, input) {

@@ -118,13 +118,16 @@ export async function loginAssetActor(page: Page, scenario: AssetScenario, kind:
   const user = scenario.users[kind]; if (!user) throw new Error("Synthetic actor absent");
   await page.goto("/login/"); await page.getByLabel("Email PLN").fill(user.email); await page.getByLabel("Kata sandi").fill(process.env.E2E_TEST_PASSWORD!); await page.getByRole("button", { name: "Masuk", exact: true }).click(); await expect(page).toHaveURL(/\/ringkasan\/$/);
 }
-type UploadOptions = { previewTimeoutMs?: number; processTimeoutMs?: number };
+type UploadOptions = { previewTimeoutMs?: number; processTimeoutMs?: number; startTimeoutMs?: number };
 type AssetWorkbookInput = string | { name: string; mimeType: string; buffer: Buffer };
 function isProcessRequest(request: Request) {
   return request.method() === "POST" && new URL(request.url()).pathname.endsWith("/process/");
 }
 async function waitForProcessResult(page: Page, scenario: AssetScenario, action: () => Promise<void>, options: UploadOptions = {}): Promise<ImportResponse> {
   const starts = new Map<Request, number>();
+  let requestStarted = false;
+  let markRequestStarted!: () => void;
+  const firstRequest = new Promise<void>(resolve => { markRequestStarted = resolve; });
   let settle: ((result: ImportResponse) => void) | undefined;
   let rejectResult: ((error: Error) => void) | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -135,6 +138,7 @@ async function waitForProcessResult(page: Page, scenario: AssetScenario, action:
   };
   const onRequest = (request: Request) => {
     if (!isProcessRequest(request)) return;
+    if (!requestStarted) { requestStarted = true; markRequestStarted(); }
     starts.set(request, Date.now());
     armResponseTimeout();
   };
@@ -142,16 +146,33 @@ async function waitForProcessResult(page: Page, scenario: AssetScenario, action:
     if (!isProcessRequest(response.request())) return;
     void (async () => {
       try {
+        if (![200, 202].includes(response.status())) throw new Error(`Synthetic processing failed with HTTP ${response.status()}`);
         const body = importResponseSchema.parse(await response.json());
         const observation = { status: response.status(), durationMs: Date.now() - (starts.get(response.request()) ?? Date.now()), body };
         scenario.processResponses.push(observation); scenario.processDurationsMs.push(observation.durationMs);
-        if (![200, 202].includes(observation.status)) throw new Error(`Synthetic processing failed with HTTP ${observation.status}`);
         if (body.stage !== "PROCESSING") settle?.(body); else armResponseTimeout();
       } catch (error) { rejectResult?.(error instanceof Error ? error : new Error("Synthetic process response was invalid")); }
     })();
   };
   page.on("request", onRequest); page.on("response", onResponse);
-  try { await action(); return await result; }
+  try {
+    await action();
+    if (!requestStarted) {
+      const alert = page.getByRole("alert").filter({ hasText: /\S/ });
+      const startTimeoutMs = options.startTimeoutMs ?? options.processTimeoutMs ?? 300000;
+      const start = await Promise.race([
+        firstRequest.then(() => ({ kind: "request" as const })),
+        alert.waitFor({ state: "visible", timeout: startTimeoutMs })
+          .then(async () => ({ kind: "alert" as const, message: (await alert.innerText()).trim() || "UI reported an import failure" }))
+          .catch(() => ({ kind: "timeout" as const })),
+      ]);
+      if (start.kind !== "request") {
+        const detail = start.kind === "alert" ? start.message : "no UI error was visible";
+        throw new Error(`Synthetic processing request did not start: ${detail}`);
+      }
+    }
+    return await result;
+  }
   finally { if (timeout) clearTimeout(timeout); page.off("request", onRequest); page.off("response", onResponse); }
 }
 async function startAssetWorkbookInput(page: Page, input: AssetWorkbookInput, options: UploadOptions = {}) {

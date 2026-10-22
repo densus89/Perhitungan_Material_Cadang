@@ -67,6 +67,10 @@ describe("resumable import fake lifecycle", () => {
     const complete = await resumableFixture(2);
     const completeClaim = await complete.deps.claimProcessing(actor.userId, complete.claimInput);
     await complete.deps.commitChunk(actor.userId, completeClaim.run.id, completeClaim.leaseToken, chunk(completeClaim.run.id));
+    await expect(complete.deps.finalize(actor.userId, completeClaim.run.id, completeClaim.leaseToken)).rejects.toThrow("Prepared finalization evidence required");
+    for (const part of ["ROWS_HASH", "VALUATIONS_HASH", "SUMMARY"] as const) {
+      await complete.deps.prepareFinalization(actor.userId, completeClaim.run.id, completeClaim.leaseToken, part);
+    }
     await complete.deps.finalize(actor.userId, completeClaim.run.id, completeClaim.leaseToken);
     expect(complete.tables.asset_import_runs[0].status).toBe("COMPLETE");
   });

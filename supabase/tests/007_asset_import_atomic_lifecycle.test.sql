@@ -7,6 +7,7 @@ select has_function('public','replace_asset_import_mapping',array['uuid','uuid',
 select has_function('public','reserve_asset_import_run',array['uuid','uuid','uuid','jsonb'],'Reservation is transactional');
 select has_function('public','fail_asset_import_run',array['uuid','uuid'],'Failure can release a stale reservation');
 select has_function('public','complete_asset_import_comparison',array['uuid','uuid','uuid','uuid'],'Comparison sealing is current-run conditional');
+select has_function('public','prepare_asset_import_finalization',array['uuid','uuid','uuid','text'],'Large resumable imports prepare bounded finalization evidence');
 select has_function('public','submit_asset_version',array['uuid','uuid','uuid','uuid','text','uuid','uuid'],'Submission requires expected state');
 select ok(to_regprocedure('public.submit_asset_version(uuid,uuid)') is null,'No stale two-argument submission bypass');
 
@@ -214,7 +215,7 @@ select throws_ok($$update public.asset_import_chunks set rows_hash=repeat('f',64
 select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'22023',null,'Gap in manifest prevents finalization');
 select is(pg_temp.chunk(0),2000,'Full 2000-pair chunk commits');
 select is((select count(*) from public.asset_snapshot_rows where import_run_id=pg_temp.uid(8,5)),2001::bigint,'Exact paired row total persisted');
-select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'22023',null,'Complete manifest cannot bypass global hash check');
+select throws_ok($$select public.prepare_asset_import_finalization(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),'ROWS_HASH')$$,'22023',null,'Prepared evidence cannot bypass global hash check');
 select lives_ok($$select public.release_asset_import_processing(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'Current owner releases lease');
 select throws_ok($$select pg_temp.chunk(1)$$,'22023',null,'Released token cannot replay');
 create temporary table resume_state as select pg_temp.claim() state;
@@ -222,6 +223,15 @@ update lease_evidence set token=(select (state->>'processing_lease_token')::uuid
 select is((select jsonb_array_length(state->'completed_chunks') from resume_state),2,'Resume reports durable completed manifest');
 select is(pg_temp.chunk(0),2000,'Committed chunk replay survives lease handoff');
 update public.asset_import_runs r set expected_rows_hash=h.rows_hash,expected_valuations_hash=h.valuations_hash from private.asset_run_hashes(pg_temp.uid(8,5))h where r.id=pg_temp.uid(8,5);
+select throws_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'22023',null,'Resumable finalization requires prepared evidence');
+select throws_ok($$select public.prepare_asset_import_finalization(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),'UNKNOWN')$$,'22023',null,'Unknown finalization part is rejected');
+select throws_ok($$select public.prepare_asset_import_finalization(pg_temp.uid(1,2),pg_temp.uid(8,5),pg_temp.token(),'ROWS_HASH')$$,'42501',null,'Unassigned actor cannot prepare finalization');
+select lives_ok($$select public.prepare_asset_import_finalization(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),'ROWS_HASH')$$,'Rows hash is prepared independently');
+select lives_ok($$select public.prepare_asset_import_finalization(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),'VALUATIONS_HASH')$$,'Valuations hash is prepared independently');
+select lives_ok($$select public.prepare_asset_import_finalization(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token(),'SUMMARY')$$,'Summary is prepared independently');
+select is((select prepared_rows_hash from public.asset_import_runs where id=pg_temp.uid(8,5)),(select rows_hash from private.asset_run_hashes(pg_temp.uid(8,5))),'Prepared rows hash derives from persisted data');
+select is((select prepared_valuations_hash from public.asset_import_runs where id=pg_temp.uid(8,5)),(select valuations_hash from private.asset_run_hashes(pg_temp.uid(8,5))),'Prepared valuations hash derives from persisted data');
+select is((select prepared_summary->>'rowCount' from public.asset_import_runs where id=pg_temp.uid(8,5)),'2001','Prepared summary derives from persisted data');
 select lives_ok($$select public.finalize_asset_import_run(pg_temp.uid(1,1),pg_temp.uid(8,5),pg_temp.token())$$,'Exact manifest counts and hashes finalize');
 select is((select status::text from public.asset_import_runs where id=pg_temp.uid(8,5)),'COMPLETE','Resumable run completed');
 select is((select summary->>'rowCount' from public.asset_import_run_metadata where import_run_id=pg_temp.uid(8,5)),'2001','Final summary derives from complete persisted data');
