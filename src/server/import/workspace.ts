@@ -18,7 +18,7 @@ export async function loadImportDrafts(client: SupabaseClient<Database>, actor: 
   return data.filter(row => actor.unitIndukIds.includes(row.unit_induk_id)).map(row => {
     const latest = [...row.asset_import_runs].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
     const versionStage = stageSchema.safeParse(row.dataset_versions?.status);
-    const terminal = versionStage.success && ["PENDING_RST", "ACTIVE", "HISTORICAL", "NEEDS_FIX"].includes(versionStage.data);
+    const terminal = versionStage.success && ["PENDING_RST", "ACTIVE", "HISTORICAL"].includes(versionStage.data);
     const stage = terminal && versionStage.success ? versionStage.data : latest?.status === "PROCESSING" ? "PROCESSING" : latest?.status === "FAILED" ? "FAILED" : versionStage.success ? versionStage.data : row.import_sheets.some(sheet => sheet.selected) ? "READY_TO_PROCESS" : row.import_sheets.length ? "MAPPING" : "UPLOAD";
     const progress = latest?.status === "PROCESSING" ? importProgress(latest.expected_row_count, latest.asset_import_chunks.map(chunk => ({ chunkIndex: chunk.chunk_index, rowCount: chunk.row_count }))) : undefined;
     return { importId: row.id, unitId: row.unit_induk_id, datasetId: row.dataset_id, versionId: row.dataset_version_id, fileName: row.source_files?.original_name ?? "Snapshot XLSX", createdAt: row.created_at, stage, rowCount: latest?.expected_row_count ?? null, ...(progress ? { progress } : {}) };

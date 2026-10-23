@@ -40,8 +40,8 @@ it("pushes issue/source/condition/search filters and exact count/range into Post
   expect(events).toContainEqual({ table: "asset_valuations", method: "limit", args: [100] });
   expect(events.filter(event => event.method === "range" || event.table === "asset_valuations" && event.method === "in")).toHaveLength(2);
 });
-it("bounds and sanitizes RLS draft listing and exposes stored completed/expected progress", async () => {
-  const result = Promise.resolve({ data: [{ id: actor.userId, unit_induk_id: unitId, dataset_id: actor.userId, dataset_version_id: actor.userId, created_at: "2026-10-16T00:00:00Z", source_files: { original_name: "synthetic.xlsx", object_path: "secret" }, dataset_versions: { status: "DRAFT" }, asset_import_runs: [{ status: "PROCESSING", created_at: "2026-10-16T01:00:00Z", expected_row_count: 6_000, asset_import_chunks: [{ chunk_index: 0, row_count: 2_000 }] }], import_sheets: [] }, { id: "foreign", unit_induk_id: "other", source_files: { original_name: "secret.xlsx" } }], error: null });
+it("bounds and sanitizes returned draft listing while exposing the newer retry progress", async () => {
+  const result = Promise.resolve({ data: [{ id: actor.userId, unit_induk_id: unitId, dataset_id: actor.userId, dataset_version_id: actor.userId, created_at: "2026-10-16T00:00:00Z", source_files: { original_name: "synthetic.xlsx", object_path: "secret" }, dataset_versions: { status: "NEEDS_FIX" }, asset_import_runs: [{ status: "PROCESSING", created_at: "2026-10-16T01:00:00Z", expected_row_count: 6_000, asset_import_chunks: [{ chunk_index: 0, row_count: 2_000 }] }], import_sheets: [] }, { id: "foreign", unit_induk_id: "other", source_files: { original_name: "secret.xlsx" } }], error: null });
   const query = Object.assign(result, { order: vi.fn(), limit: vi.fn() }); query.order.mockReturnValue(query); query.limit.mockReturnValue(query);
   const inScope = vi.fn(() => query);
   const client = { from: () => ({ select: () => ({ in: inScope }) }) };
