@@ -120,7 +120,7 @@ test.describe.serial("private, versioned synthetic asset import", () => {
       await expect(page.getByText(/Respons terputus.*Status tersimpan diperiksa/)).toBeVisible();
       expect(lostResponse).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 8_000, expectedRows: rowCount } });
       expect(scenario.processResponses.at(-1)?.durationMs).toBeLessThan(240000);
-      await expect(page.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "16000");
+      await expect(page.getByRole("progressbar", { name: "Progres pemrosesan aset" })).toHaveAttribute("value", "8000");
 
       await page.reload();
       await page.getByRole("button", { name: `Lanjutkan ${scenario.fileName("lost-response")}` }).click();
