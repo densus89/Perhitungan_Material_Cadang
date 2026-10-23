@@ -43,10 +43,15 @@ export function useAssetImport(initialDrafts: ImportDraft[], actorUnits: ImportU
   const preview = snapshot?.preview ?? null;
   const previewReady = Boolean(snapshot?.mapping && snapshot.file === file && snapshot.mapping === mapping);
   const confirmed = previewReady && confirmedSnapshot === snapshot;
-  useEffect(() => () => {
-    mounted.current = false;
-    previewGeneration.current++; authorityGeneration.current++;
-    worker.current?.terminate(); worker.current = null;
+  useEffect(() => {
+    const activePreviewGeneration = previewGeneration;
+    const activeAuthorityGeneration = authorityGeneration;
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      activePreviewGeneration.current++; activeAuthorityGeneration.current++;
+      worker.current?.terminate(); worker.current = null;
+    };
   }, []);
 
   function cancelPreview() {

@@ -72,6 +72,39 @@ describe("private import lifecycle", () => {
     expect(result).toMatchObject({ stage: "PROCESSING", progress: { completedRows: 2_000, expectedRows: 6_000, completedChunks: 1, expectedChunks: 3, percent: 33 } });
     expect(JSON.stringify(result)).not.toMatch(/lease|token/i);
   });
+  it("keeps a newer resumable retry PROCESSING after RST returned the prior result for fixes", async () => {
+    const f = await resumableFixture(8_001);
+    const session = f.tables.import_sessions[0];
+    f.tables.dataset_versions[0].status = "NEEDS_FIX";
+    f.tables.dataset_versions[0].updated_at = "2026-10-16T00:00:00.000Z";
+    session.current_run_id = "30000000-0000-4000-8000-000000000099";
+    f.tables.asset_import_runs = [{
+      id: session.current_run_id,
+      import_session_id: session.id,
+      unit_induk_id: unitId,
+      dataset_version_id: session.dataset_version_id,
+      status: "COMPLETE",
+      created_at: "2026-10-15T00:00:00.000Z",
+      mapping_revision: session.mapping_revision,
+      mapping_hash: "prior-layout",
+      rule_version: "synthetic-v0",
+    }];
+    const claim = await f.deps.claimProcessing(actor.userId, f.claimInput);
+    f.tables.asset_import_chunks = Array.from({ length: 4 }, (_, chunkIndex) => ({
+      import_run_id: claim.run.id,
+      unit_induk_id: unitId,
+      chunk_index: chunkIndex,
+      start_ordinal: chunkIndex * 2_000,
+      row_count: 2_000,
+      rows_hash: "e".repeat(64),
+      valuations_hash: "f".repeat(64),
+    }));
+
+    await expect(loadAssetImport(actor, f.created.importId, f.deps)).resolves.toMatchObject({
+      stage: "PROCESSING",
+      progress: { completedRows: 8_000, expectedRows: 8_001, completedChunks: 4, expectedChunks: 5, percent: 99 },
+    });
+  });
   it("signs only non-upsert private objects and verifies metadata before downloading", async () => {
     const signed = vi.fn(async (path: string) => ({ data: { path, token: "synthetic" }, error: null }));
     const info = vi.fn(async () => ({ data: { metadata: { size: 2, mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } }, error: null }));

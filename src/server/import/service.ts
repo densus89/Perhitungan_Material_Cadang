@@ -118,7 +118,7 @@ export async function loadAssetImport(actor: Actor, importId: string, deps: Impo
   if (["PENDING_RST", "ACTIVE", "HISTORICAL"].includes(version.status)) stage = version.status as ImportResponse["stage"];
   // A returned version remains blocked until a later finalized run is ready.
   // The relational version status stays NEEDS_FIX until the audited submit RPC.
-  if (version.status === "NEEDS_FIX" && !(currentMatches && current && Date.parse(current.created_at) > Date.parse(version.updated_at))) stage = "NEEDS_FIX";
+  if (version.status === "NEEDS_FIX" && !runs.some((run) => run.status === "PROCESSING") && !(currentMatches && current && Date.parse(current.created_at) > Date.parse(version.updated_at))) stage = "NEEDS_FIX";
   const result: ImportResponse = { importId, datasetId: session.dataset_id, versionId: version.id, stage };
   result.source = { unitId: session.unit_induk_id, fileName: source.original_name, byteSize: source.byte_size, sha256: source.sha256 };
   if (typeof diagnostics?.ruleVersion === "string") result.ruleVersion = diagnostics.ruleVersion;
